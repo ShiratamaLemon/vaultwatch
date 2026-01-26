@@ -1,0 +1,452 @@
+'use client';
+
+import { useState, useEffect, useCallback } from 'react';
+import { useParams } from 'next/navigation';
+import Link from 'next/link';
+import { useAccount } from 'wagmi';
+import {
+  ArrowLeft,
+  Globe,
+  Twitter,
+  MessageCircle,
+  Github,
+  CheckCircle,
+  Shield,
+  ExternalLink,
+  Loader2,
+  Wallet,
+  AlertCircle,
+} from 'lucide-react';
+import { Container } from '@/components/layout/Container';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Skeleton } from '@/components/ui/skeleton';
+import { Separator } from '@/components/ui/separator';
+import { CommitmentTimeline } from '@/components/commitment/CommitmentTimeline';
+import { useDataHaven } from '@/hooks/useDataHaven';
+import { PROJECT_CATEGORY_LABELS, PROJECT_STATUS_LABELS } from '@/types';
+import { getAccountLink } from '@/lib/datahaven/explorer';
+import { toast } from 'sonner';
+import type { Project, Commitment, CommitmentStatus } from '@/types';
+
+export default function ProjectDetailPage() {
+  const params = useParams();
+  const bucketId = params.id as string; // URL param is now bucketId
+  const { isConnected, address } = useAccount();
+  const { 
+    isInitialized, 
+    isLoading: isDataHavenLoading,
+    loadProject,
+    loadCommitments,
+    updateCommitmentStatus,
+  } = useDataHaven();
+
+  const [project, setProject] = useState<Project | null>(null);
+  const [commitments, setCommitments] = useState<Commitment[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [isUpdatingStatus, setIsUpdatingStatus] = useState(false);
+
+  // Load project and commitments from MSP
+  useEffect(() => {
+    const loadData = async () => {
+      if (!isInitialized || !bucketId) return;
+
+      setIsLoading(true);
+      setError(null);
+
+      try {
+        // Load project metadata
+        const projectData = await loadProject(bucketId);
+        if (!projectData) {
+          setError('Project not found');
+          setIsLoading(false);
+          return;
+        }
+
+        // Add bucketId to project data
+        setProject({ ...projectData, bucketId });
+
+        // Load commitments
+        const commitmentsData = await loadCommitments(bucketId);
+        setCommitments(commitmentsData);
+
+        console.log(`✅ Loaded project "${projectData.name}" with ${commitmentsData.length} commitments`);
+      } catch (err) {
+        console.error('Failed to load project:', err);
+        setError('Failed to load project data');
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    loadData();
+  }, [isInitialized, bucketId, loadProject, loadCommitments]);
+
+  // Handle commitment status update
+  const handleStatusUpdate = useCallback(
+    async (commitmentId: string, newStatus: CommitmentStatus, reason: string) => {
+      const commitment = commitments.find((c) => c.id === commitmentId);
+      if (!commitment) {
+        toast.error('Commitment not found');
+        return;
+      }
+
+      setIsUpdatingStatus(true);
+      toast.info('Updating commitment status...');
+
+      try {
+        const result = await updateCommitmentStatus(
+          bucketId,
+          commitment,
+          newStatus,
+          reason
+        );
+
+        if (result.success) {
+          // Update local state with new status and txHash
+          setCommitments((prev) =>
+            prev.map((c) =>
+              c.id === commitmentId
+                ? {
+                    ...c,
+                    status: newStatus,
+                    statusReason: reason || undefined,
+                    statusUpdatedAt: Date.now(),
+                    statusUpdatedBy: address,
+                    previousStatus: c.status,
+                    previousFileKey: c.fileKey,
+                    fileKey: result.fileKey || c.fileKey,
+                    txHash: result.txHash || c.txHash,
+                    blockNumber: result.blockNumber || c.blockNumber,
+                    updatedAt: Date.now(),
+                  }
+                : c
+            )
+          );
+          toast.success('Status updated successfully!');
+        } else {
+          toast.error('Failed to update status');
+        }
+      } catch (err) {
+        console.error('Failed to update status:', err);
+        toast.error('Failed to update status. Please try again.');
+      } finally {
+        setIsUpdatingStatus(false);
+      }
+    },
+    [bucketId, commitments, updateCommitmentStatus, address]
+  );
+
+  // Show wallet connection prompt
+  if (!isConnected) {
+    return (
+      <div className="py-12">
+        <Container>
+          <Link
+            href="/projects"
+            className="mb-8 inline-flex items-center text-sm text-muted-foreground hover:text-foreground"
+          >
+            <ArrowLeft className="mr-2 h-4 w-4" />
+            Back to Projects
+          </Link>
+
+          <Card className="border-border/40">
+            <CardContent className="flex flex-col items-center justify-center py-16">
+              <Wallet className="h-12 w-12 text-muted-foreground mb-4" />
+              <p className="text-lg font-medium mb-2">Connect Your Wallet</p>
+              <p className="text-muted-foreground text-center max-w-md">
+                Connect your wallet to view project details stored on DataHaven.
+              </p>
+            </CardContent>
+          </Card>
+        </Container>
+      </div>
+    );
+  }
+
+  // Show loading state
+  if (isDataHavenLoading || isLoading) {
+    return (
+      <div className="py-12">
+        <Container>
+          <Skeleton className="mb-8 h-8 w-32" />
+          <div className="grid gap-8 lg:grid-cols-3">
+            <div className="lg:col-span-2 space-y-4">
+              <Skeleton className="h-48 w-full" />
+              <Skeleton className="h-64 w-full" />
+            </div>
+            <div>
+              <Skeleton className="h-64 w-full" />
+            </div>
+          </div>
+        </Container>
+      </div>
+    );
+  }
+
+  // Show error state
+  if (error || !project) {
+    return (
+      <div className="py-12">
+        <Container>
+          <Link
+            href="/projects"
+            className="mb-8 inline-flex items-center text-sm text-muted-foreground hover:text-foreground"
+          >
+            <ArrowLeft className="mr-2 h-4 w-4" />
+            Back to Projects
+          </Link>
+
+          <Card className="border-border/40 border-red-500/20">
+            <CardContent className="flex flex-col items-center justify-center py-16">
+              <AlertCircle className="h-12 w-12 text-red-400 mb-4" />
+              <p className="text-lg font-medium mb-2">Project Not Found</p>
+              <p className="text-muted-foreground text-center max-w-md">
+                {error || 'The project could not be loaded from DataHaven.'}
+              </p>
+            </CardContent>
+          </Card>
+        </Container>
+      </div>
+    );
+  }
+
+  const isOwner = address?.toLowerCase() === project.ownerAddress?.toLowerCase();
+
+  return (
+    <div className="py-12">
+      <Container>
+        {/* Back Button */}
+        <Link
+          href="/projects"
+          className="mb-8 inline-flex items-center text-sm text-muted-foreground hover:text-foreground"
+        >
+          <ArrowLeft className="mr-2 h-4 w-4" />
+          Back to Projects
+        </Link>
+
+        <div className="grid gap-8 lg:grid-cols-3">
+          {/* Main Content */}
+          <div className="lg:col-span-2 space-y-8">
+            {/* Project Header */}
+            <div>
+              <div className="flex items-start gap-4">
+                <div className="flex h-16 w-16 items-center justify-center rounded-xl bg-emerald-500/10">
+                  <span className="text-2xl font-bold text-emerald-400">
+                    {project.name.charAt(0).toUpperCase()}
+                  </span>
+                </div>
+                <div className="flex-1">
+                  <h1 className="text-2xl font-bold sm:text-3xl">{project.name}</h1>
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                    <Badge variant="outline">
+                      {PROJECT_CATEGORY_LABELS[project.category]}
+                    </Badge>
+                    <Badge
+                      variant="outline"
+                      className="bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
+                    >
+                      {PROJECT_STATUS_LABELS[project.status]}
+                    </Badge>
+                    {isOwner && (
+                      <Badge variant="outline" className="bg-blue-500/10 text-blue-400 border-blue-500/20">
+                        Your Project
+                      </Badge>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              <p className="mt-4 text-muted-foreground">{project.description}</p>
+
+              {/* Links */}
+              <div className="mt-4 flex flex-wrap gap-2">
+                {project.website && (
+                  <Button variant="outline" size="sm" asChild>
+                    <a href={project.website} target="_blank" rel="noopener noreferrer">
+                      <Globe className="mr-2 h-4 w-4" />
+                      Website
+                    </a>
+                  </Button>
+                )}
+                {project.twitter && (
+                  <Button variant="outline" size="sm" asChild>
+                    <a href={project.twitter} target="_blank" rel="noopener noreferrer">
+                      <Twitter className="mr-2 h-4 w-4" />
+                      Twitter
+                    </a>
+                  </Button>
+                )}
+                {project.discord && (
+                  <Button variant="outline" size="sm" asChild>
+                    <a href={project.discord} target="_blank" rel="noopener noreferrer">
+                      <MessageCircle className="mr-2 h-4 w-4" />
+                      Discord
+                    </a>
+                  </Button>
+                )}
+                {project.github && (
+                  <Button variant="outline" size="sm" asChild>
+                    <a href={project.github} target="_blank" rel="noopener noreferrer">
+                      <Github className="mr-2 h-4 w-4" />
+                      GitHub
+                    </a>
+                  </Button>
+                )}
+              </div>
+
+              {/* Add Commitment Button (for owner) */}
+              {isOwner && (
+                <div className="mt-6">
+                  <Button asChild className="bg-emerald-600 hover:bg-emerald-700">
+                    <Link href={`/dashboard/${bucketId}/add`}>
+                      Add New Commitment
+                    </Link>
+                  </Button>
+                </div>
+              )}
+            </div>
+
+            <Separator />
+
+            {/* Commitments Timeline */}
+            <div>
+              <h2 className="mb-6 text-xl font-bold">
+                Commitment Timeline
+                {commitments.length > 0 && (
+                  <span className="ml-2 text-sm font-normal text-muted-foreground">
+                    ({commitments.length} commitments)
+                  </span>
+                )}
+              </h2>
+              {commitments.length > 0 ? (
+                <CommitmentTimeline
+                  commitments={commitments}
+                  isOwner={isOwner}
+                  onStatusUpdate={handleStatusUpdate}
+                />
+              ) : (
+                <Card className="border-border/40">
+                  <CardContent className="flex flex-col items-center justify-center py-12">
+                    <p className="text-muted-foreground">
+                      No commitments recorded yet.
+                    </p>
+                    {isOwner && (
+                      <Button asChild className="mt-4" variant="outline">
+                        <Link href={`/dashboard/${bucketId}/add`}>
+                          Add First Commitment
+                        </Link>
+                      </Button>
+                    )}
+                  </CardContent>
+                </Card>
+              )}
+            </div>
+          </div>
+
+          {/* Sidebar */}
+          <div className="space-y-6">
+            {/* Verification Card */}
+            <Card className="border-emerald-500/20 bg-emerald-500/5">
+              <CardHeader className="pb-3">
+                <CardTitle className="flex items-center text-lg">
+                  <Shield className="mr-2 h-5 w-5 text-emerald-400" />
+                  Verification Status
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="flex items-center space-x-2 text-emerald-400">
+                  <CheckCircle className="h-5 w-5" />
+                  <span className="font-medium">Stored on DataHaven</span>
+                </div>
+                <p className="mt-2 text-sm text-muted-foreground">
+                  All data is retrieved from decentralized storage and can be cryptographically verified.
+                </p>
+              </CardContent>
+            </Card>
+
+            {/* Project Info Card */}
+            <Card className="border-border/40">
+              <CardHeader className="pb-3">
+                <CardTitle className="text-lg">Project Info</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div>
+                  <div className="text-xs text-muted-foreground">Owner</div>
+                  <a
+                    href={getAccountLink(project.ownerAddress, 'dhscan')}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="font-mono text-sm text-emerald-400 hover:underline"
+                  >
+                    {project.ownerAddress.slice(0, 6)}...
+                    {project.ownerAddress.slice(-4)}
+                  </a>
+                </div>
+                <div>
+                  <div className="text-xs text-muted-foreground">Registered</div>
+                  <div className="text-sm">
+                    {new Date(project.createdAt).toLocaleDateString('ja-JP', {
+                      year: 'numeric',
+                      month: 'long',
+                      day: 'numeric',
+                    })}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-xs text-muted-foreground">Last Updated</div>
+                  <div className="text-sm">
+                    {new Date(project.updatedAt).toLocaleDateString('ja-JP', {
+                      year: 'numeric',
+                      month: 'long',
+                      day: 'numeric',
+                    })}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-xs text-muted-foreground">Commitments</div>
+                  <div className="text-sm">{commitments.length}</div>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* DataHaven Info Card */}
+            <Card className="border-border/40">
+              <CardHeader className="pb-3">
+                <CardTitle className="text-lg">DataHaven Record</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div>
+                  <div className="text-xs text-muted-foreground">Bucket ID</div>
+                  <div className="font-mono text-xs break-all">
+                    {bucketId.slice(0, 20)}...{bucketId.slice(-8)}
+                  </div>
+                </div>
+                {project.merkleRoot && (
+                  <div>
+                    <div className="text-xs text-muted-foreground">Merkle Root</div>
+                    <div className="font-mono text-xs break-all">
+                      {project.merkleRoot.slice(0, 20)}...
+                    </div>
+                  </div>
+                )}
+                <Button variant="outline" size="sm" className="w-full" asChild>
+                  <a
+                    href="https://datahaven.xyz"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    <ExternalLink className="mr-2 h-4 w-4" />
+                    Learn about DataHaven
+                  </a>
+                </Button>
+              </CardContent>
+            </Card>
+          </div>
+        </div>
+      </Container>
+    </div>
+  );
+}

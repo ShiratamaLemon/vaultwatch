@@ -1,0 +1,199 @@
+# VaultWatch - Cursor Rules
+
+## プロジェクト概要
+
+VaultWatchは、クリプトプロジェクトの透明性を検証可能な形で記録するプラットフォームです。
+DataHaven分散型ストレージを活用し、プロジェクトの「約束」を改ざん不可能な形で保存します。
+
+### コアコンセプト
+- プロジェクトが自らの約束（ロードマップ、トークノミクス等）を登録
+- DataHavenに保存され、改ざん不可能なタイムスタンプが付与
+- 投資家は「約束 vs 実績」を追跡し、信頼性を評価
+
+### 現在の開発状況（2026-01-25 23:45更新）
+
+| 状態 | 説明 |
+|------|------|
+| ✅ SDK統合完了 | 公式StorageHub SDKを使用した実装完了 |
+| ✅ UI実装完了 | すべてのページ・コンポーネント実装済み |
+| ✅ テストネット動作確認完了 | プロジェクト登録・コミットメント・ステータス更新が正常動作 |
+| ✅ ステータス更新機能 | オーナーがコミットメントのステータスを変更可能 |
+| ✅ オンチェーンリンク | DHScanへのTXリンク、FileKeyコピー機能 |
+
+**現在の状態**: MVP機能が完成し、テストネットで動作確認済み。ハッカソン提出準備中。
+
+## 技術スタック
+
+- **Framework**: Next.js 14 (App Router)
+- **Language**: TypeScript (strict mode)
+- **Styling**: Tailwind CSS + shadcn/ui
+- **Wallet**: RainbowKit + wagmi v2 + viem
+- **Storage**: DataHaven SDK (@storagehub-sdk/core, @storagehub-sdk/msp-client)
+- **State Management**: Zustand
+
+## コーディング規約
+
+### 言語ルール
+- コード内のコメント: 英語
+- ユーザー向けUI文字列: 英語
+- ドキュメント: 日本語可
+- 変数名・関数名: 英語、キャメルケース
+
+### ファイル命名規則
+| 種類 | 命名規則 | 例 |
+|------|---------|-----|
+| コンポーネント | PascalCase | `ProjectCard.tsx` |
+| フック | camelCase with 'use' prefix | `useProject.ts` |
+| ユーティリティ | camelCase | `utils.ts` |
+| 型定義 | camelCase | `project.ts` |
+| 定数 | UPPER_SNAKE_CASE | `constants.ts` |
+
+### コンポーネント規約
+```typescript
+// 関数コンポーネント（アロー関数）を使用
+// Props型はinterfaceで定義し、Propsサフィックスを付ける
+
+interface ProjectCardProps {
+  project: Project;
+  onClick?: () => void;
+}
+
+export const ProjectCard = ({ project, onClick }: ProjectCardProps) => {
+  return (
+    // ...
+  );
+};
+```
+
+### 'use client' ディレクティブ
+- 必要な場合のみ使用（useState, useEffect, イベントハンドラ等）
+- サーバーコンポーネントをデフォルトとする
+
+### 型定義ルール
+- `any`の使用禁止
+- 型は`src/types/`ディレクトリに集約
+- DataHaven関連の型は`src/lib/datahaven/types.ts`に定義
+- インポートは`@/types`エイリアスを使用
+
+### インポート順序
+```typescript
+// 1. React/Next.js
+import { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
+
+// 2. 外部ライブラリ
+import { useAccount } from 'wagmi';
+import { ConnectButton } from '@rainbow-me/rainbowkit';
+
+// 3. 内部モジュール（エイリアス使用）
+import { useProject } from '@/hooks/useProject';
+import { ProjectCard } from '@/components/project/ProjectCard';
+import { Project } from '@/types';
+
+// 4. スタイル・アセット
+import styles from './styles.module.css';
+```
+
+## DataHaven連携ルール
+
+### SDK操作
+- すべてのSDK操作は`src/lib/datahaven/`に集約
+- 直接コンポーネントからSDKを呼び出さない
+- カスタムフック経由でアクセス
+
+### エラーハンドリング
+```typescript
+// 必ずtry-catchでラップ
+try {
+  const result = await datahavenClient.uploadFile(file);
+  return result;
+} catch (error) {
+  console.error('DataHaven upload failed:', error);
+  throw new DataHavenError('Failed to upload file', error);
+}
+```
+
+### Merkle証明
+- ファイル取得時は必ず検証を実施
+- 検証失敗時はユーザーに警告を表示
+
+## ディレクトリ構造
+
+```
+src/
+├── app/                  # Next.js App Router（ページ）
+│   ├── layout.tsx        # ルートレイアウト
+│   ├── page.tsx          # ホームページ
+│   ├── providers.tsx     # プロバイダー（wagmi, RainbowKit等）
+│   ├── projects/         # プロジェクト関連ページ
+│   ├── register/         # 登録ページ
+│   └── dashboard/        # ダッシュボード
+├── components/           # UIコンポーネント
+│   ├── ui/               # shadcn/ui（編集しない）
+│   ├── layout/           # Header, Footer, Container
+│   ├── wallet/           # ウォレット関連
+│   ├── project/          # プロジェクト関連
+│   └── commitment/       # コミットメント関連
+├── lib/                  # ユーティリティ・設定
+│   ├── datahaven/        # DataHaven SDK連携
+│   ├── wagmi/            # wagmi設定
+│   └── utils.ts          # 汎用ユーティリティ
+├── hooks/                # カスタムフック
+├── stores/               # Zustand ストア
+└── types/                # TypeScript型定義
+```
+
+## 重要な参照ドキュメント
+
+コード生成・修正時は以下を参照すること：
+
+- `docs/ARCHITECTURE.md` - アーキテクチャ設計
+- `docs/DATA_MODEL.md` - データモデル定義
+- `docs/FEATURES.md` - 機能仕様
+- `docs/DATAHAVEN_INTEGRATION.md` - DataHaven SDK連携ガイド
+
+## DataHaven テストネット情報
+
+| 項目 | 値 |
+|------|-----|
+| Chain ID | 55931 |
+| RPC URL | https://services.datahaven-testnet.network/testnet |
+| WSS URL | wss://services.datahaven-testnet.network/testnet |
+| MSP URL | https://deo-dh-backend.testnet.datahaven-infra.network/ |
+
+### 重要: Bucket Deposit
+
+**新しいバケット作成には 100 MOCK のデポジットが必要です。**
+
+- デポジットは Substrate の Reserved Balance としてロックされる
+- Free Balance が 100 MOCK 以上必要
+- Faucet は 24時間に1回のみ使用可能
+
+### Block Explorers
+
+| エクスプローラー | URL | 用途 |
+|----------------|-----|------|
+| DHScan | https://testnet.dhscan.io/ | EVMトランザクション確認（メイン） |
+| Basic Explorer | https://datahaven-explorer.netlify.app/ | シンプルなEVM確認 |
+| Statescan | https://datahaven-testnet.statescan.io/#/ | Substrate層（ブロック番号で検索） |
+
+**注意**: StatescanはSubstrate層用のため、EVM TXハッシュでは検索できません。ブロック番号を使用してください。
+
+## UI/UXガイドライン
+
+### カラースキーム
+- ダークモード優先
+- プライマリカラー: プロジェクトのブランドカラーに合わせて設定
+- 成功/警告/エラーの色は一貫性を保つ
+
+### レスポンシブ対応
+- モバイルファーストで設計
+- ブレイクポイント: sm(640px), md(768px), lg(1024px), xl(1280px)
+
+### ローディング状態
+- すべての非同期操作でローディング表示
+- スケルトンUIを優先的に使用
+
+### エラー表示
+- ユーザーフレンドリーなメッセージ
+- 復旧アクションを提示
