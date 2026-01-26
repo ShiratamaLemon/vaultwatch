@@ -5,6 +5,15 @@
 VaultWatchは、クリプトプロジェクトの透明性を検証可能な形で記録するプラットフォームです。
 DataHaven分散型ストレージを活用し、プロジェクトの「約束」を改ざん不可能な形で保存します。
 
+## 📊 開発ステータス
+
+| 状態 | 説明 |
+|------|------|
+| ✅ MVP完成 | コア機能が完成し、テストネットで動作確認済み |
+| ✅ SDK統合完了 | 公式StorageHub SDKを使用した実装完了 |
+| ✅ UI実装完了 | すべてのページ・コンポーネント実装済み |
+| ✅ テストネット動作確認完了 | プロジェクト登録・コミットメント・ステータス更新が正常動作 |
+
 ## 🎯 コンセプト
 
 - **プロジェクト**が自らの約束（ロードマップ、トークノミクス等）を登録
@@ -13,11 +22,15 @@ DataHaven分散型ストレージを活用し、プロジェクトの「約束�
 
 ## ✨ 主な機能
 
-- 🔐 ウォレット接続（RainbowKit）
-- 📝 プロジェクト登録・管理
-- 📜 コミットメント（約束）の記録
-- 📊 タイムライン表示
-- ✅ Merkle証明による検証
+| 機能 | 説明 |
+|------|------|
+| 🔐 ウォレット接続 | RainbowKit（MetaMask, WalletConnect対応） |
+| 📝 プロジェクト登録 | DataHavenへの保存、バケット作成 |
+| 📜 コミットメント記録 | 約束の登録、2段階アップロードでtxHash永続化 |
+| 🔄 ステータス更新 | In Progress / Completed / Delayed / Cancelled |
+| 📊 タイムライン表示 | 時系列表示、重複排除 |
+| 🔗 オンチェーンリンク | DHScanへのTXリンク、File Keyコピー機能 |
+| ✅ データ検証 | Merkle証明による改ざん検知 |
 
 ## 🛠️ 技術スタック
 
@@ -26,8 +39,31 @@ DataHaven分散型ストレージを活用し、プロジェクトの「約束�
 | **Frontend** | Next.js 14 (App Router), TypeScript |
 | **Styling** | Tailwind CSS, shadcn/ui |
 | **Wallet** | RainbowKit, wagmi v2, viem |
-| **Storage** | DataHaven SDK (@storagehub-sdk/*) |
+| **Storage** | DataHaven SDK (@storagehub-sdk/core, @storagehub-sdk/msp-client) |
 | **State** | Zustand |
+
+## 🏗️ アーキテクチャ
+
+### 2段階アップロードの仕組み
+
+コミットメントのtxHashを永続化するために採用した方式：
+
+```
+1. 最初のアップロード
+   ├─ JSONデータをMSPに送信
+   ├─ issueStorageRequest()でチェーンに記録
+   └─ txHash, fileKey, blockNumberを取得
+
+2. 2回目のアップロード
+   ├─ 取得したtxHash等を含めてJSONを再作成
+   ├─ 同じパスに再アップロード
+   └─ 永続的にtxHashが保存される
+
+3. データ読み込み時
+   ├─ MSPからファイルリストを取得
+   ├─ 同名ファイルはuploadedAtで最新を選択（重複排除）
+   └─ txHashが含まれたコミットメントを表示
+```
 
 ## 🚀 セットアップ
 
@@ -35,12 +71,13 @@ DataHaven分散型ストレージを活用し、プロジェクトの「約束�
 
 - Node.js v22以上
 - pnpm（推奨）
+- MetaMask または WalletConnect対応ウォレット
 
 ### インストール
 
 ```bash
 # リポジトリをクローン
-git clone <repository-url>
+git clone https://github.com/ShiratamaLemon/vaultwatch.git
 cd vaultwatch
 
 # 依存関係をインストール
@@ -65,26 +102,33 @@ NEXT_PUBLIC_MSP_URL=https://deo-dh-backend.testnet.datahaven-infra.network/
 NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID=your_project_id
 ```
 
+### 使い方
+
+1. **ウォレット接続**: 画面右上の「Connect Wallet」をクリック
+2. **プロジェクト登録**: 「Register Project」からプロジェクト情報を入力（100 MOCKのデポジットが必要）
+3. **コミットメント追加**: ダッシュボードから「Add Commitment」でロードマップ等を登録
+4. **ステータス更新**: タイムラインのステータスバッジをクリックして進捗を更新
+5. **検証**: DHScanリンクからオンチェーンデータを確認
+
 ## 📁 ディレクトリ構造
 
 ```
 src/
-├── app/          # ページ（App Router）
+├── app/              # ページ（App Router）
 │   ├── projects/     # プロジェクト一覧・詳細
 │   ├── register/     # プロジェクト登録
 │   └── dashboard/    # ダッシュボード
-├── components/   # UIコンポーネント
+├── components/       # UIコンポーネント
 │   ├── ui/           # shadcn/ui
-│   ├── layout/       # レイアウト
-│   ├── wallet/       # ウォレット関連
-│   ├── project/      # プロジェクト関連
-│   └── commitment/   # コミットメント関連
-├── lib/          # ユーティリティ、SDK連携
-│   ├── datahaven/    # DataHaven SDK
+│   ├── layout/       # Header, Footer, Container
+│   ├── project/      # ProjectCard, ProjectForm, ProjectList
+│   └── commitment/   # CommitmentCard, CommitmentForm, StatusUpdateModal
+├── lib/              # ユーティリティ、SDK連携
+│   ├── datahaven/    # DataHaven SDK（client, explorer, types）
 │   └── wagmi/        # wagmi設定
-├── hooks/        # カスタムフック
-├── stores/       # 状態管理（Zustand）
-└── types/        # 型定義
+├── hooks/            # カスタムフック（useDataHaven）
+├── stores/           # 状態管理（Zustand）
+└── types/            # TypeScript型定義
 ```
 
 ## 📖 ドキュメント
@@ -93,6 +137,7 @@ src/
 - [データモデル](docs/DATA_MODEL.md)
 - [機能仕様](docs/FEATURES.md)
 - [DataHaven連携ガイド](docs/DATAHAVEN_INTEGRATION.md)
+- [現在のステータス](docs/CURRENT_STATUS.md)
 
 ## 🌐 DataHaven テストネット情報
 
@@ -105,11 +150,16 @@ src/
 
 ### Block Explorers
 
-| エクスプローラー | URL |
-|----------------|-----|
-| DataHaven Testnet Explorer | https://testnet.dhscan.io/ |
-| Basic Explorer | https://datahaven-explorer.netlify.app/ |
-| Statescan | https://datahaven-testnet.statescan.io/#/ |
+| エクスプローラー | URL | 用途 |
+|----------------|-----|------|
+| DHScan | https://testnet.dhscan.io/ | EVMトランザクション確認（メイン） |
+| Basic Explorer | https://datahaven-explorer.netlify.app/ | シンプルなEVM確認 |
+| Statescan | https://datahaven-testnet.statescan.io/#/ | Substrate層（ブロック番号で検索） |
+
+### 重要: テストネット利用
+
+- **Faucet**: https://faucet.datahaven-testnet.network/ （24時間に1回）
+- **バケット作成**: 100 MOCKのデポジットが必要（Reserved Balanceとしてロック）
 
 ## 🤝 コントリビューション
 
