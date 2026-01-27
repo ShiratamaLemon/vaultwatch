@@ -2,98 +2,99 @@
 
 **Crypto Projects' Promises, Permanently Recorded**
 
-VaultWatchは、クリプトプロジェクトの透明性を検証可能な形で記録するプラットフォームです。
-DataHaven分散型ストレージを活用し、プロジェクトの「約束」を改ざん不可能な形で保存します。
+VaultWatch is a platform that records crypto project transparency in a verifiable way. It leverages DataHaven decentralized storage to store project "promises" in a tamper-proof manner.
 
-## 📊 開発ステータス
+## 📊 Development Status
 
-| 状態 | 説明 |
-|------|------|
-| ✅ MVP完成 | コア機能が完成し、テストネットで動作確認済み |
-| ✅ SDK統合完了 | 公式StorageHub SDKを使用した実装完了 |
-| ✅ UI実装完了 | すべてのページ・コンポーネント実装済み |
-| ✅ テストネット動作確認完了 | プロジェクト登録・コミットメント・ステータス更新が正常動作 |
+| Status | Description |
+|--------|-------------|
+| ✅ MVP Complete | Core features completed and tested on testnet |
+| ✅ SDK Integration Complete | Implementation using official StorageHub SDK |
+| ✅ UI Implementation Complete | All pages and components implemented |
+| ✅ Testnet Verification Complete | Project registration, commitments, and status updates working correctly |
+| ✅ Security Features Implemented | Merkle verification and on-chain ownership verification (2026-01-27) |
 
-## 🎯 コンセプト
+## 🎯 Concept
 
-- **プロジェクト**が自らの約束（ロードマップ、トークノミクス等）を登録
-- **DataHaven**に保存され、改ざん不可能なタイムスタンプが付与
-- **投資家**は「約束 vs 実績」を追跡し、信頼性を評価
+- **Projects** register their promises (roadmaps, tokenomics, etc.)
+- Data is stored on **DataHaven** with tamper-proof timestamps
+- **Investors** track "promises vs. achievements" and evaluate reliability
 
-## ✨ 主な機能
+## ✨ Key Features
 
-| 機能 | 説明 |
-|------|------|
-| 🔐 ウォレット接続 | RainbowKit（MetaMask, WalletConnect対応） |
-| 📝 プロジェクト登録 | DataHavenへの保存、バケット作成 |
-| 📜 コミットメント記録 | 約束の登録、2段階アップロードでtxHash永続化 |
-| 🔄 ステータス更新 | In Progress / Completed / Delayed / Cancelled |
-| 📊 タイムライン表示 | 時系列表示、重複排除 |
-| 🔗 オンチェーンリンク | DHScanへのTXリンク、File Keyコピー機能 |
-| ✅ データ検証 | Merkle証明による改ざん検知 |
+| Feature | Description |
+|---------|-------------|
+| 🔐 Wallet Connection | RainbowKit (MetaMask, WalletConnect support) |
+| 📝 Project Registration | Save to DataHaven, create buckets |
+| 📜 Commitment Recording | Register promises, 2-stage upload for permanent txHash storage |
+| 🔄 Status Updates | In Progress / Completed / Delayed / Cancelled |
+| 📊 Timeline Display | Chronological display with deduplication |
+| 🔗 On-chain Links | TX links to DHScan, File Key copy functionality |
+| ✅ Data Verification | Tamper detection via Merkle proofs |
+| 🛡️ Ownership Verification | On-chain ownership verification before write operations |
 
-## 🛠️ 技術スタック
+## 🛠️ Tech Stack
 
-| カテゴリ | 技術 |
-|---------|------|
+| Category | Technology |
+|---------|-----------|
 | **Frontend** | Next.js 14 (App Router), TypeScript |
 | **Styling** | Tailwind CSS, shadcn/ui |
 | **Wallet** | RainbowKit, wagmi v2, viem |
 | **Storage** | DataHaven SDK (@storagehub-sdk/core, @storagehub-sdk/msp-client) |
 | **State** | Zustand |
 
-## 🏗️ アーキテクチャ
+## 🏗️ Architecture
 
-### 2段階アップロードの仕組み
+### Two-Stage Upload Mechanism
 
-コミットメントのtxHashを永続化するために採用した方式：
+A method adopted to permanently store commitment txHashes:
 
 ```
-1. 最初のアップロード
-   ├─ JSONデータをMSPに送信
-   ├─ issueStorageRequest()でチェーンに記録
-   └─ txHash, fileKey, blockNumberを取得
+1. First Upload
+   ├─ Send JSON data to MSP
+   ├─ Record on chain via issueStorageRequest()
+   └─ Obtain txHash, fileKey, blockNumber
 
-2. 2回目のアップロード
-   ├─ 取得したtxHash等を含めてJSONを再作成
-   ├─ 同じパスに再アップロード
-   └─ 永続的にtxHashが保存される
+2. Second Upload
+   ├─ Recreate JSON including obtained txHash, etc.
+   ├─ Re-upload to the same path
+   └─ txHash is permanently stored
 
-3. データ読み込み時
-   ├─ MSPからファイルリストを取得
-   ├─ 同名ファイルはuploadedAtで最新を選択（重複排除）
-   └─ txHashが含まれたコミットメントを表示
+3. Data Loading
+   ├─ Get file list from MSP
+   ├─ Select latest by uploadedAt for files with same name (deduplication)
+   └─ Display commitments with txHash
 ```
 
-## 🚀 セットアップ
+## 🚀 Setup
 
-### 前提条件
+### Prerequisites
 
-- Node.js v22以上
-- pnpm（推奨）
-- MetaMask または WalletConnect対応ウォレット
+- Node.js v22 or higher
+- pnpm (recommended)
+- MetaMask or WalletConnect-compatible wallet
 
-### インストール
+### Installation
 
 ```bash
-# リポジトリをクローン
+# Clone the repository
 git clone https://github.com/ShiratamaLemon/vaultwatch.git
 cd vaultwatch
 
-# 依存関係をインストール
+# Install dependencies
 pnpm install
 
-# 環境変数を設定
+# Set up environment variables
 cp .env.example .env.local
-# .env.local を編集
+# Edit .env.local
 
-# 開発サーバーを起動
+# Start the development server
 pnpm dev
 ```
 
-### 環境変数
+### Environment Variables
 
-`.env.local` に以下を設定：
+Set the following in `.env.local`:
 
 ```
 NEXT_PUBLIC_DATAHAVEN_RPC_URL=https://services.datahaven-testnet.network/testnet
@@ -102,47 +103,51 @@ NEXT_PUBLIC_MSP_URL=https://deo-dh-backend.testnet.datahaven-infra.network/
 NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID=your_project_id
 ```
 
-### 使い方
+**Note**: Get your WalletConnect Project ID from [WalletConnect Cloud](https://cloud.walletconnect.com/) (free). The app will work with injected wallets (like MetaMask) without it, but WalletConnect features require it.
 
-1. **ウォレット接続**: 画面右上の「Connect Wallet」をクリック
-2. **プロジェクト登録**: 「Register Project」からプロジェクト情報を入力（100 MOCKのデポジットが必要）
-3. **コミットメント追加**: ダッシュボードから「Add Commitment」でロードマップ等を登録
-4. **ステータス更新**: タイムラインのステータスバッジをクリックして進捗を更新
-5. **検証**: DHScanリンクからオンチェーンデータを確認
+### Usage
 
-## 📁 ディレクトリ構造
+1. **Connect Wallet**: Click "Connect Wallet" in the top right
+2. **Register Project**: Enter project information from "Register Project" (requires 100 MOCK deposit)
+3. **Add Commitment**: Register roadmaps, etc. from Dashboard → "Add Commitment"
+4. **Update Status**: Click status badge in timeline to update progress
+5. **Verify**: Check on-chain data via DHScan links
+6. **Data Integrity**: View verification badges showing Merkle proof verification status
+
+## 📁 Directory Structure
 
 ```
 src/
-├── app/              # ページ（App Router）
-│   ├── projects/     # プロジェクト一覧・詳細
-│   ├── register/     # プロジェクト登録
-│   └── dashboard/    # ダッシュボード
-├── components/       # UIコンポーネント
+├── app/              # Pages (App Router)
+│   ├── projects/     # Project list & details
+│   ├── register/     # Project registration
+│   └── dashboard/    # Dashboard
+├── components/       # UI Components
 │   ├── ui/           # shadcn/ui
 │   ├── layout/       # Header, Footer, Container
 │   ├── project/      # ProjectCard, ProjectForm, ProjectList
 │   └── commitment/   # CommitmentCard, CommitmentForm, StatusUpdateModal
-├── lib/              # ユーティリティ、SDK連携
-│   ├── datahaven/    # DataHaven SDK（client, explorer, types）
-│   └── wagmi/        # wagmi設定
-├── hooks/            # カスタムフック（useDataHaven）
-├── stores/           # 状態管理（Zustand）
-└── types/            # TypeScript型定義
+├── lib/              # Utilities, SDK Integration
+│   ├── datahaven/    # DataHaven SDK (client, explorer, types, verification-cache)
+│   └── wagmi/        # wagmi configuration
+├── hooks/            # Custom Hooks (useDataHaven)
+├── stores/           # State Management (Zustand)
+└── types/            # TypeScript Type Definitions
 ```
 
-## 📖 ドキュメント
+## 📖 Documentation
 
-- [アーキテクチャ設計](docs/ARCHITECTURE.md)
-- [データモデル](docs/DATA_MODEL.md)
-- [機能仕様](docs/FEATURES.md)
-- [DataHaven連携ガイド](docs/DATAHAVEN_INTEGRATION.md)
-- [現在のステータス](docs/CURRENT_STATUS.md)
+- [Architecture Design](docs/ARCHITECTURE.md)
+- [Data Model](docs/DATA_MODEL.md)
+- [Feature Specifications](docs/FEATURES.md)
+- [DataHaven Integration Guide](docs/DATAHAVEN_INTEGRATION.md)
+- [Current Status](docs/CURRENT_STATUS.md)
+- [Security Audit Report](docs/SECURITY_AUDIT_INTEGRATED.md)
 
-## 🌐 DataHaven テストネット情報
+## 🌐 DataHaven Testnet Information
 
-| 項目 | 値 |
-|------|-----|
+| Item | Value |
+|------|-------|
 | Chain ID | 55931 |
 | RPC URL | https://services.datahaven-testnet.network/testnet |
 | WSS URL | wss://services.datahaven-testnet.network/testnet |
@@ -150,25 +155,40 @@ src/
 
 ### Block Explorers
 
-| エクスプローラー | URL | 用途 |
-|----------------|-----|------|
-| DHScan | https://testnet.dhscan.io/ | EVMトランザクション確認（メイン） |
-| Basic Explorer | https://datahaven-explorer.netlify.app/ | シンプルなEVM確認 |
-| Statescan | https://datahaven-testnet.statescan.io/#/ | Substrate層（ブロック番号で検索） |
+| Explorer | URL | Purpose |
+|----------|-----|---------|
+| DHScan | https://testnet.dhscan.io/ | EVM transaction verification (main) |
+| Basic Explorer | https://datahaven-explorer.netlify.app/ | Simple EVM verification |
+| Statescan | https://datahaven-testnet.statescan.io/#/ | Substrate layer (search by block number) |
 
-### 重要: テストネット利用
+### Important: Testnet Usage
 
-- **Faucet**: https://faucet.datahaven-testnet.network/ （24時間に1回）
-- **バケット作成**: 100 MOCKのデポジットが必要（Reserved Balanceとしてロック）
+- **Faucet**: https://faucet.datahaven-testnet.network/ (once per 24 hours)
+- **Bucket Creation**: Requires 100 MOCK deposit (locked as Reserved Balance)
 
-## 🤝 コントリビューション
+## 🔒 Security Features
 
-1. このリポジトリをフォーク
-2. フィーチャーブランチを作成 (`git checkout -b feature/amazing-feature`)
-3. 変更をコミット (`git commit -m 'Add amazing feature'`)
-4. ブランチをプッシュ (`git push origin feature/amazing-feature`)
-5. プルリクエストを作成
+### Data Integrity Verification (Merkle Verification)
 
-## 📝 ライセンス
+- Automatic verification of downloaded data against on-chain fingerprints
+- Visual verification badges showing verification status
+- Asynchronous verification for optimal UX (data displayed immediately, verification in background)
+- Verification result caching to avoid redundant checks
 
-MIT License - 詳細は [LICENSE](LICENSE) を参照
+### On-chain Ownership Verification
+
+- Ownership verification before write operations (commitment addition, status updates)
+- Prevents unauthorized modifications even if metadata is tampered with
+- Minimal UX impact (verification only on write operations)
+
+## 🤝 Contributing
+
+1. Fork this repository
+2. Create a feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
+
+## 📝 License
+
+MIT License - See [LICENSE](LICENSE) for details
