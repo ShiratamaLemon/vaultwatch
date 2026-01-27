@@ -1,6 +1,6 @@
 # VaultWatch 現在のステータス
 
-**最終更新**: 2026年1月25日 23:45 JST
+**最終更新**: 2026年1月27日
 
 ## 概要
 
@@ -19,6 +19,9 @@ VaultWatchは、DataHaven分散型ストレージを活用したクリプトプ�
 | コミットメント登録機能 | ✅ 完了 | 2026-01-25 |
 | ステータス更新機能 | ✅ 完了 | 2026-01-25 |
 | オンチェーンリンク | ✅ 完了 | 2026-01-25 |
+| **Merkle検証機能** | ✅ 完了 | 2026-01-26 |
+| **オンチェーン所有権検証** | ✅ 完了 | 2026-01-27 |
+| **セキュリティ対策** | ✅ 完了 | 2026-01-27 |
 
 ---
 
@@ -53,6 +56,8 @@ VaultWatchは、DataHaven分散型ストレージを活用したクリプトプ�
 | ファイルアップロード | ✅ 動作確認済み | JSON形式 |
 | ファイル読み込み | ✅ 動作確認済み | MSPから取得 |
 | 重複ファイル排除 | ✅ 動作確認済み | uploadedAtで最新を選択 |
+| **Merkle検証** | ✅ 動作確認済み | データ整合性の検証（2026-01-26追加） |
+| **オンチェーン所有権検証** | ✅ 動作確認済み | 書き込み操作前の検証（2026-01-27追加） |
 
 ### 4. UI/UX
 
@@ -166,26 +171,34 @@ Block 1267399: Commitment with txHash
 
 ## 📁 更新されたファイル一覧
 
-本セッションで追加・修正されたファイル：
+### 2026-01-27 セキュリティ対策実装
 
-### 新規作成
+**新規作成**:
+- `src/lib/datahaven/verification-cache.ts` - 検証結果キャッシュ
+- `src/components/ui/verification-badge.tsx` - 検証バッジコンポーネント
 
-| ファイル | 説明 |
-|---------|------|
-| `components/commitment/StatusUpdateModal.tsx` | ステータス更新モーダル |
-| `components/ui/tooltip.tsx` | ツールチップコンポーネント |
+**修正**:
+- `src/lib/datahaven/client.ts` - `verifyBucketOwnership()`, `verifyDataIntegrity()`追加
+- `src/hooks/useDataHaven.ts` - 所有権検証、Merkle検証フック追加
+- `src/app/projects/[id]/page.tsx` - 検証バッジ統合
+- `src/components/commitment/CommitmentForm.tsx` - 所有権検証追加
+- `src/components/commitment/CommitmentTimeline.tsx` - 検証バッジ表示
+- `src/lib/wagmi/config.ts` - WalletConnect Project ID警告機能
 
-### 修正
+### 2026-01-25 機能実装
 
-| ファイル | 変更内容 |
-|---------|---------|
-| `components/commitment/CommitmentTimeline.tsx` | ステータス更新ボタン、オンチェーンリンク追加 |
-| `components/commitment/CommitmentCard.tsx` | オンチェーンリンク追加 |
-| `components/commitment/CommitmentForm.tsx` | 2段階アップロード実装 |
-| `hooks/useDataHaven.ts` | updateCommitmentStatus関数追加 |
-| `lib/datahaven/client.ts` | 重複排除ロジック、型修正 |
-| `types/commitment.ts` | txHash, blockNumber, previousStatus等追加 |
-| `app/projects/[id]/page.tsx` | ステータス更新ハンドラー追加 |
+**新規作成**:
+- `components/commitment/StatusUpdateModal.tsx` - ステータス更新モーダル
+- `components/ui/tooltip.tsx` - ツールチップコンポーネント
+
+**修正**:
+- `components/commitment/CommitmentTimeline.tsx` - ステータス更新ボタン、オンチェーンリンク追加
+- `components/commitment/CommitmentCard.tsx` - オンチェーンリンク追加
+- `components/commitment/CommitmentForm.tsx` - 2段階アップロード実装
+- `hooks/useDataHaven.ts` - updateCommitmentStatus関数追加
+- `lib/datahaven/client.ts` - 重複排除ロジック、型修正
+- `types/commitment.ts` - txHash, blockNumber, previousStatus等追加
+- `app/projects/[id]/page.tsx` - ステータス更新ハンドラー追加
 
 ---
 

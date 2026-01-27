@@ -15,12 +15,16 @@ import type {
   BucketInfo,
   FileUploadResult,
   MspHealthStatus,
+  VerificationResult,
+  VerificationStatus,
+  VerifiedDownloadResult,
 } from '@/lib/datahaven/types';
 import type {
   StorageCostEstimate,
   FileStorageVerification,
   Bucket,
   FileTree,
+  DownloadOptions,
 } from '@/lib/datahaven/client';
 import type { Project, Commitment, CommitmentStatus } from '@/types';
 
@@ -29,6 +33,17 @@ interface StatusUpdateResult {
   fileKey?: string;
   txHash?: string;
   blockNumber?: number;
+}
+
+/**
+ * Download result with verification info
+ */
+interface DownloadResult<T> {
+  data: T | null;
+  verification: {
+    status: VerificationStatus;
+    reason?: string;
+  };
 }
 
 interface UseDataHavenReturn {
@@ -56,7 +71,33 @@ interface UseDataHavenReturn {
     data: T,
     type: 'project' | 'commitment' | 'index'
   ) => Promise<FileUploadResult | null>;
+  
+  /**
+   * Download file with verification (recommended)
+   * @param fileKey - File key to download
+   * @param options - Download options including verification settings
+   * @returns Downloaded data with verification status
+   */
+  downloadFileVerified: <T>(
+    fileKey: string,
+    options?: DownloadOptions
+  ) => Promise<DownloadResult<T>>;
+  
+  /**
+   * Download file (legacy, no verification info returned)
+   * @deprecated Use downloadFileVerified instead
+   */
   downloadFile: <T>(fileKey: string) => Promise<T | null>;
+  
+  /**
+   * Verify data integrity against on-chain fingerprint
+   */
+  verifyDataIntegrity: (
+    fileKey: string,
+    data: Uint8Array | Blob,
+    expectedFingerprint?: string
+  ) => Promise<VerificationResult>;
+  
   verifyFileStorage: (fileKey: string, bucketId?: string) => Promise<FileStorageVerification | null>;
 
   // Cost estimation
@@ -72,6 +113,19 @@ interface UseDataHavenReturn {
   loadProject: (bucketId: string) => Promise<Project | null>;
   loadCommitments: (bucketId: string) => Promise<Commitment[]>;
   getBucketFiles: (bucketId: string, path?: string) => Promise<FileTree[]>;
+  
+  // Data retrieval with verification
+  loadProjectWithVerification: (
+    bucketId: string
+  ) => Promise<{ data: Project | null; verification: VerificationResult }>;
+  loadCommitmentsWithVerification: (
+    bucketId: string
+  ) => Promise<Array<{ data: Commitment; verification: VerificationResult; fileKey: string }>>;
+
+  // Ownership verification (on-chain)
+  verifyBucketOwnership: (
+    bucketId: string
+  ) => Promise<{ isOwner: boolean; reason?: string }>;
 
   // Commitment status update
   updateCommitmentStatus: (
@@ -296,7 +350,59 @@ export const useDataHaven = (): UseDataHavenReturn => {
   );
 
   /**
-   * Download a file
+   * Download file from DataHaven with verification
+   * This is the recommended method for downloading files
+   */
+  const downloadFileVerified = useCallback(
+    async <T>(
+      fileKey: string,
+      options: DownloadOptions = {}
+    ): Promise<DownloadResult<T>> => {
+      if (!isInitialized) {
+        setError(new Error('Not initialized'));
+        return {
+          data: null,
+          verification: {
+            status: 'unavailable',
+            reason: 'DataHaven not initialized',
+          },
+        };
+      }
+
+      setIsLoading(true);
+      setError(null);
+
+      try {
+        const { downloadJsonFile } = await import('@/lib/datahaven/client');
+        const result = await downloadJsonFile<T>(fileKey, options);
+        
+        return {
+          data: result.data,
+          verification: {
+            status: result.verification.status,
+            reason: result.verification.reason,
+          },
+        };
+      } catch (err) {
+        console.error('Failed to download file:', err);
+        setError(err instanceof Error ? err : new Error('Download failed'));
+        return {
+          data: null,
+          verification: {
+            status: 'failed',
+            reason: err instanceof Error ? err.message : 'Download failed',
+          },
+        };
+      } finally {
+        setIsLoading(false);
+      }
+    },
+    [isInitialized]
+  );
+
+  /**
+   * Download file from DataHaven (legacy, without verification info)
+   * @deprecated Use downloadFileVerified instead
    */
   const downloadFile = useCallback(
     async <T>(fileKey: string): Promise<T | null> => {
@@ -310,7 +416,13 @@ export const useDataHaven = (): UseDataHavenReturn => {
 
       try {
         const { downloadJsonFile } = await import('@/lib/datahaven/client');
-        const result = await downloadJsonFile<T>(fileKey);
+        const result = await downloadJsonFile<T>(fileKey, { verify: true });
+        
+        // Log verification status but don't block
+        if (result.verification.status === 'failed') {
+          console.warn(`⚠️ Data integrity verification failed: ${result.verification.reason}`);
+        }
+        
         return result.data;
       } catch (err) {
         console.error('Failed to download file:', err);
@@ -318,6 +430,37 @@ export const useDataHaven = (): UseDataHavenReturn => {
         return null;
       } finally {
         setIsLoading(false);
+      }
+    },
+    [isInitialized]
+  );
+
+  /**
+   * Verify data integrity against on-chain fingerprint
+   */
+  const verifyDataIntegrity = useCallback(
+    async (
+      fileKey: string,
+      data: Uint8Array | Blob,
+      expectedFingerprint?: string
+    ): Promise<VerificationResult> => {
+      if (!isInitialized) {
+        return {
+          verified: false,
+          reason: 'DataHaven not initialized',
+        };
+      }
+
+      try {
+        const { verifyDataIntegrity: verifyFn } = await import('@/lib/datahaven/client');
+        return await verifyFn(fileKey, data, expectedFingerprint);
+      } catch (err) {
+        console.error('Failed to verify data integrity:', err);
+        return {
+          verified: false,
+          reason: err instanceof Error ? err.message : 'Verification failed',
+          error: err,
+        };
       }
     },
     [isInitialized]
@@ -591,10 +734,120 @@ export const useDataHaven = (): UseDataHavenReturn => {
   }, [isInitialized, authenticate]);
 
   /**
+   * Load project with verification
+   */
+  const loadProjectWithVerification = useCallback(
+    async (bucketId: string): Promise<{ data: Project | null; verification: VerificationResult }> => {
+      if (!isInitialized) {
+        return {
+          data: null,
+          verification: { verified: false, reason: 'Not initialized' },
+        };
+      }
+
+      try {
+        const {
+          loadProjectFromBucketWithVerification,
+          isAuthenticated: checkAuth,
+        } = await import('@/lib/datahaven/client');
+
+        // Ensure authenticated
+        if (!checkAuth()) {
+          const authSuccess = await authenticate();
+          if (!authSuccess) {
+            return {
+              data: null,
+              verification: { verified: false, reason: 'Authentication failed' },
+            };
+          }
+        }
+
+        return await loadProjectFromBucketWithVerification<Project>(bucketId);
+      } catch (err) {
+        console.error('Failed to load project with verification:', err);
+        return {
+          data: null,
+          verification: {
+            verified: false,
+            reason: err instanceof Error ? err.message : 'Unknown error',
+            error: err,
+          },
+        };
+      }
+    },
+    [isInitialized, authenticate]
+  );
+
+  /**
+   * Load commitments with verification
+   */
+  const loadCommitmentsWithVerification = useCallback(
+    async (
+      bucketId: string
+    ): Promise<Array<{ data: Commitment; verification: VerificationResult; fileKey: string }>> => {
+      if (!isInitialized) {
+        return [];
+      }
+
+      try {
+        const {
+          loadCommitmentsFromBucketWithVerification,
+          isAuthenticated: checkAuth,
+        } = await import('@/lib/datahaven/client');
+
+        // Ensure authenticated
+        if (!checkAuth()) {
+          const authSuccess = await authenticate();
+          if (!authSuccess) {
+            return [];
+          }
+        }
+
+        return await loadCommitmentsFromBucketWithVerification<Commitment>(bucketId);
+      } catch (err) {
+        console.error('Failed to load commitments with verification:', err);
+        setError(err instanceof Error ? err : new Error('Failed to load commitments'));
+        return [];
+      }
+    },
+    [isInitialized, authenticate]
+  );
+
+  /**
+   * Verify bucket ownership on-chain
+   * Provides secure, tamper-proof ownership verification
+   */
+  const verifyBucketOwnership = useCallback(
+    async (bucketId: string): Promise<{ isOwner: boolean; reason?: string }> => {
+      if (!isInitialized) {
+        return { isOwner: false, reason: 'Not initialized' };
+      }
+
+      if (!address) {
+        return { isOwner: false, reason: 'Wallet not connected' };
+      }
+
+      try {
+        const { verifyBucketOwnership: verifyOwnership } = await import('@/lib/datahaven/client');
+        return await verifyOwnership(bucketId, address);
+      } catch (err) {
+        console.error('Failed to verify bucket ownership:', err);
+        return { 
+          isOwner: false, 
+          reason: err instanceof Error ? err.message : 'Verification failed' 
+        };
+      }
+    },
+    [isInitialized, address]
+  );
+
+  /**
    * Update commitment status
    * 
    * Creates a new status update record in DataHaven.
    * The original commitment is preserved; status updates are stored as separate files.
+   * 
+   * Note: Includes on-chain ownership verification before write operation.
    */
   const updateCommitmentStatus = useCallback(
     async (
@@ -612,7 +865,21 @@ export const useDataHaven = (): UseDataHavenReturn => {
       setError(null);
 
       try {
-        const { uploadJsonFile, isAuthenticated: checkAuth } = await import('@/lib/datahaven/client');
+        const { 
+          uploadJsonFile, 
+          isAuthenticated: checkAuth,
+          verifyBucketOwnership: verifyOwnership,
+        } = await import('@/lib/datahaven/client');
+
+        // On-chain ownership verification before write operation
+        const ownershipCheck = await verifyOwnership(bucketId, address);
+        if (!ownershipCheck.isOwner) {
+          console.warn('On-chain ownership verification failed:', ownershipCheck.reason);
+          setError(new Error(`Access denied: ${ownershipCheck.reason || 'You are not the owner of this bucket'}`));
+          setIsLoading(false);
+          return { success: false };
+        }
+        console.log('✅ On-chain ownership verified');
 
         // Check SDK-level session state
         if (!checkAuth()) {
@@ -716,6 +983,8 @@ export const useDataHaven = (): UseDataHavenReturn => {
     getBucket,
     uploadFile,
     downloadFile,
+    downloadFileVerified,
+    verifyDataIntegrity,
     verifyFileStorage,
     estimateCost,
     getCostEstimateString,
@@ -726,6 +995,11 @@ export const useDataHaven = (): UseDataHavenReturn => {
     loadProject,
     loadCommitments,
     getBucketFiles,
+    // Data retrieval with verification
+    loadProjectWithVerification,
+    loadCommitmentsWithVerification,
+    // Ownership verification (on-chain)
+    verifyBucketOwnership,
     // Commitment status update
     updateCommitmentStatus,
   };

@@ -50,6 +50,7 @@ export const CommitmentForm = ({ projectId, bucketId }: CommitmentFormProps) => 
     isLoading: isDataHavenLoading,
     uploadFile,
     initialize,
+    verifyBucketOwnership,
   } = useDataHaven();
 
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -124,6 +125,16 @@ export const CommitmentForm = ({ projectId, bucketId }: CommitmentFormProps) => 
     setIsSubmitting(true);
 
     try {
+      // On-chain ownership verification before write operation
+      toast.info('Verifying ownership...');
+      const ownershipCheck = await verifyBucketOwnership(bucketId);
+      if (!ownershipCheck.isOwner) {
+        toast.error(`Access denied: ${ownershipCheck.reason || 'You are not the owner of this project'}`);
+        setIsSubmitting(false);
+        return;
+      }
+      console.log('✅ On-chain ownership verified');
+
       const commitmentId = uuidv4();
       const now = Date.now();
 

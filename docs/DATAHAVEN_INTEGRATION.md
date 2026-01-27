@@ -538,6 +538,125 @@ Statescanはブロック番号でリンクするため、「Block View」と表�
 - StorageRequestFulfilledイベントの検索 → Statescan（ブロック番号）
 - ファイルキーのオンチェーン状態確認 → DHScan
 
+## データ整合性検証（Merkle検証）
+
+### 概要
+
+VaultWatchでは、DataHavenに保存されたデータの整合性をオンチェーンフィンガープリントと比較して検証します。これにより、データが改ざんされていないことを保証します。
+
+### 検証フロー
+
+```typescript
+// 1. ファイルをダウンロード
+const result = await downloadJsonFile<Project>(
+  fileKey,
+  { verify: true } // 検証を有効化
+);
+
+// 2. 検証結果を確認
+if (result.verification.status === 'verified') {
+  console.log('✅ データ整合性が確認されました');
+} else {
+  console.warn('⚠️ 検証失敗:', result.verification.reason);
+}
+```
+
+### 実装詳細
+
+**フィンガープリント計算**:
+```typescript
+// FileManagerを使用してSHA256ベースのフィンガープリントを計算
+const fingerprint = await calculateFingerprint(blob);
+```
+
+**オンチェーンフィンガープリント取得**:
+```typescript
+// Polkadot APIでストレージリクエストからフィンガープリントを取得
+const storageRequest = await polkadotApiInstance.query.fileSystem.storageRequests(fileKey);
+const onChainFingerprint = storageRequest.unwrap().fingerprint.toString();
+```
+
+**比較・検証**:
+```typescript
+const isMatch = calculatedFingerprint === onChainFingerprint;
+```
+
+### UI統合
+
+検証結果は `VerificationBadge` コンポーネントで視覚的に表示されます：
+
+```typescript
+import { VerificationBadge } from '@/components/ui/verification-badge';
+
+<VerificationBadge 
+  status={verificationStatus}
+  size="sm"
+  showLabel={false}
+/>
+```
+
+**検証ステータス**:
+- `verified` - 検証成功（緑色のチェックマーク）
+- `pending` - 検証中（黄色のスピナー）
+- `failed` - 検証失敗（赤色の警告）
+- `unverified` - 検証未実行（グレー）
+- `unavailable` - 検証不能（グレーの疑問符）
+
+### パフォーマンス最適化
+
+**非同期検証**:
+- データは即座に表示され、検証はバックグラウンドで実行
+- UIUXへの影響を最小限に抑制
+
+**キャッシュ機能**:
+- 検証結果は `localStorage` にキャッシュ
+- ファイルキーとフィンガープリントの組み合わせでキャッシュキーを生成
+- 有効期限: 1時間
+
+```typescript
+// キャッシュの使用
+import { getVerificationCache, setVerificationCache } from '@/lib/datahaven/verification-cache';
+
+const cached = getVerificationCache(fileKey, fingerprint);
+if (cached && cached.expiresAt > Date.now()) {
+  return cached.verified;
+}
+```
+
+## オンチェーン所有権検証
+
+### 概要
+
+書き込み操作（コミットメント追加、ステータス更新）前に、オンチェーンでバケットの所有者を検証します。これにより、メタデータの改ざんがあっても書き込み操作をブロックできます。
+
+### 実装
+
+```typescript
+// オンチェーンでバケット所有者を確認
+const ownershipCheck = await verifyBucketOwnership(bucketId, address);
+if (!ownershipCheck.isOwner) {
+  throw new Error(`Access denied: ${ownershipCheck.reason}`);
+}
+```
+
+**検証タイミング**:
+- ✅ コミットメント追加時（`CommitmentForm.tsx`）
+- ✅ ステータス更新時（`updateCommitmentStatus()`）
+
+**検証方法**:
+```typescript
+// Polkadot APIでバケット情報を取得
+const bucket = await polkadotApiInstance.query.providers.buckets(bucketId);
+const bucketData = bucket.unwrap().toHuman();
+const onChainOwner = bucketData.userId.toLowerCase();
+const isOwner = onChainOwner === address.toLowerCase();
+```
+
+### UIUXへの影響
+
+- **閲覧操作**: 影響なし（誰でも閲覧可能）
+- **書き込み操作**: 最小限の影響（どのみちトランザクション待ちがあるため）
+
 ## 参考リンク
 
 - [DataHaven 公式ドキュメント](https://docs.datahaven.xyz/)

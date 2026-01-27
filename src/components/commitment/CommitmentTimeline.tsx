@@ -22,14 +22,17 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip';
 import { StatusUpdateModal } from './StatusUpdateModal';
+import { VerificationBadge } from '@/components/ui/verification-badge';
 import type { Commitment, CommitmentStatus } from '@/types';
 import { COMMITMENT_TYPE_LABELS, COMMITMENT_STATUS_LABELS } from '@/types';
 import { getTransactionLink, shortenHash, copyToClipboard } from '@/lib/datahaven/explorer';
+import type { VerificationStatus } from '@/lib/datahaven/types';
 
 interface CommitmentTimelineProps {
   commitments: Commitment[];
   isOwner?: boolean;
   onStatusUpdate?: (commitmentId: string, newStatus: CommitmentStatus, reason: string) => Promise<void>;
+  verificationStatuses?: Map<string, VerificationStatus>;
 }
 
 const statusIcons: Record<CommitmentStatus, React.ElementType> = {
@@ -52,6 +55,7 @@ export const CommitmentTimeline = ({
   commitments,
   isOwner = false,
   onStatusUpdate,
+  verificationStatuses,
 }: CommitmentTimelineProps) => {
   const [selectedCommitment, setSelectedCommitment] = useState<Commitment | null>(null);
   const [showStatusModal, setShowStatusModal] = useState(false);
@@ -185,9 +189,13 @@ export const CommitmentTimeline = ({
 
                   {/* Verification & On-chain Links */}
                   <div className="mt-3 flex flex-wrap items-center gap-3 text-xs">
-                    <div className="flex items-center space-x-1 text-emerald-400">
-                      <CheckCircle className="h-3 w-3" />
-                      <span>Verified on DataHaven</span>
+                    <div className="flex items-center gap-2">
+                      <VerificationBadge
+                        status={verificationStatuses?.get(commitment.id) || 'unverified'}
+                        size="sm"
+                        showLabel={false}
+                      />
+                      <span className="text-muted-foreground">Data Integrity</span>
                     </div>
 
                     {/* On-chain Link - show txHash link if available */}

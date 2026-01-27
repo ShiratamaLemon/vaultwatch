@@ -29,6 +29,8 @@ VaultWatchは、クリプトプロジェクトの透明性を検証可能な形�
 │  │  │  ┌─────────────────┐  ┌─────────────────────┐  │    │   │
 │  │  │  │ DataHaven SDK   │  │   wagmi/viem        │  │    │   │
 │  │  │  │ Wrapper         │  │   Configuration     │  │    │   │
+│  │  │  │ - Verification  │  │   - WalletConnect   │  │    │   │
+│  │  │  │ - Ownership     │  │   - Project ID      │  │    │   │
 │  │  │  └────────┬────────┘  └──────────┬──────────┘  │    │   │
 │  │  └───────────┼──────────────────────┼─────────────┘    │   │
 │  └──────────────┼──────────────────────┼──────────────────┘   │
@@ -46,8 +48,10 @@ VaultWatchは、クリプトプロジェクトの透明性を検証可能な形�
 │  ┌───────────────────────┐  │
 │  │   DataHaven Chain     │  │
 │  │   - Merkle Root       │  │
-│  │   - Commitments       │  │
-│  │   - Verification      │  │
+│  │   - Storage Requests  │  │
+│  │   - Fingerprints      │  │
+│  │   - Bucket Registry   │  │
+│  │   - Ownership Info    │  │
 │  └───────────────────────┘  │
 └─────────────────────────────┘
 ```
@@ -137,43 +141,103 @@ VaultWatchは、クリプトプロジェクトの透明性を検証可能な形�
 2. フォームバリデーション
    │
    ▼
-3. コミットメントデータをJSON化
+3. オンチェーン所有権検証（2026-01-27追加）
+   │
+   ├─ verifyBucketOwnership(bucketId, address)
    │
    ▼
-4. DataHavenにファイルとしてアップロード
+4. コミットメントデータをJSON化
    │
    ▼
-5. プロジェクトのバケットトライを更新
+5. DataHavenにファイルとしてアップロード（1回目）
+   │
+   ├─ txHash, fileKey, blockNumberを取得
    │
    ▼
-6. 新しいMerkleルートを取得
+6. txHashを含めて再アップロード（2回目）
+   │
+   ├─ 永続的にtxHashが保存される
    │
    ▼
-7. ローカルインデックスを更新
+7. プロジェクトのバケットトライを更新
    │
    ▼
-8. タイムライン表示を更新
+8. 新しいMerkleルートを取得
+   │
+   ▼
+9. ローカルインデックスを更新
+   │
+   ▼
+10. タイムライン表示を更新
 ```
 
-### データ検証フロー
+### データ整合性検証フロー（Merkle検証）
 
 ```
 1. ユーザーがプロジェクト/コミットメントを閲覧
    │
    ▼
-2. DataHavenからファイルを取得
+2. DataHavenからファイルを取得（MSP）
    │
    ▼
-3. Merkle証明を取得
+3. フィンガープリントを計算（SHA256ベース）
    │
    ▼
-4. オンチェーンのMerkleルートと照合
+4. オンチェーンフィンガープリントを取得（Polkadot API）
+   │
+   ├─ storageRequests(fileKey) から取得
    │
    ▼
-5. 検証結果を表示
-   ├── ✅ 検証成功: データは改ざんされていない
-   └── ❌ 検証失敗: 改ざんの可能性あり（警告表示）
+5. フィンガープリントを比較
+   │
+   ▼
+6. 検証結果を表示（非同期）
+   ├── ✅ verified: データは改ざんされていない
+   ├── ⏳ pending: 検証中
+   ├── ❌ failed: 改ざんの可能性あり（警告表示）
+   └── ❓ unavailable: 検証不能（オフライン等）
+   
+7. 検証結果をキャッシュ（localStorage）
+   └─ 再検証を回避（有効期限: 1時間）
 ```
+
+**実装ファイル**:
+- `src/lib/datahaven/client.ts` - `verifyDataIntegrity()`, `calculateFingerprint()`
+- `src/lib/datahaven/verification-cache.ts` - キャッシュ機能
+- `src/components/ui/verification-badge.tsx` - UIコンポーネント
+
+### オンチェーン所有権検証フロー
+
+```
+1. ユーザーが書き込み操作を実行
+   ├─ コミットメント追加
+   └─ ステータス更新
+   │
+   ▼
+2. オンチェーンでバケット所有者を確認
+   │
+   ├─ polkadotApi.query.providers.buckets(bucketId)
+   │
+   ▼
+3. 所有者アドレスを取得
+   │
+   ├─ bucketData.userId
+   │
+   ▼
+4. 現在のウォレットアドレスと比較
+   │
+   ├─ onChainOwner.toLowerCase() === address.toLowerCase()
+   │
+   ▼
+5. 検証結果に応じた処理
+   ├── ✅ isOwner: 書き込み操作を実行
+   └── ❌ !isOwner: エラーを返却（Access Denied）
+```
+
+**実装ファイル**:
+- `src/lib/datahaven/client.ts` - `verifyBucketOwnership()`
+- `src/hooks/useDataHaven.ts` - フック経由で公開
+- `src/components/commitment/CommitmentForm.tsx` - コミットメント追加前検証
 
 ## コンポーネント設計
 

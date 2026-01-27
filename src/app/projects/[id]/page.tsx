@@ -24,11 +24,13 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Separator } from '@/components/ui/separator';
 import { CommitmentTimeline } from '@/components/commitment/CommitmentTimeline';
+import { VerificationBadge } from '@/components/ui/verification-badge';
 import { useDataHaven } from '@/hooks/useDataHaven';
 import { PROJECT_CATEGORY_LABELS, PROJECT_STATUS_LABELS } from '@/types';
 import { getAccountLink } from '@/lib/datahaven/explorer';
 import { toast } from 'sonner';
 import type { Project, Commitment, CommitmentStatus } from '@/types';
+import type { VerificationStatus, VerificationResult } from '@/lib/datahaven/types';
 
 export default function ProjectDetailPage() {
   const params = useParams();
@@ -39,25 +41,32 @@ export default function ProjectDetailPage() {
     isLoading: isDataHavenLoading,
     loadProject,
     loadCommitments,
+    loadProjectWithVerification,
+    loadCommitmentsWithVerification,
     updateCommitmentStatus,
   } = useDataHaven();
 
   const [project, setProject] = useState<Project | null>(null);
+  const [projectVerification, setProjectVerification] = useState<VerificationStatus>('pending');
   const [commitments, setCommitments] = useState<Commitment[]>([]);
+  const [commitmentVerifications, setCommitmentVerifications] = useState<
+    Map<string, VerificationStatus>
+  >(new Map());
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isUpdatingStatus, setIsUpdatingStatus] = useState(false);
 
-  // Load project and commitments from MSP
+  // Load project and commitments from MSP with verification
   useEffect(() => {
     const loadData = async () => {
       if (!isInitialized || !bucketId) return;
 
       setIsLoading(true);
       setError(null);
+      setProjectVerification('pending');
 
       try {
-        // Load project metadata
+        // Step 1: Load project metadata immediately (without verification for fast display)
         const projectData = await loadProject(bucketId);
         if (!projectData) {
           setError('Project not found');
@@ -65,24 +74,67 @@ export default function ProjectDetailPage() {
           return;
         }
 
-        // Add bucketId to project data
+        // Add bucketId to project data and display immediately
         setProject({ ...projectData, bucketId });
 
-        // Load commitments
+        // Step 2: Load commitments immediately (without verification for fast display)
         const commitmentsData = await loadCommitments(bucketId);
         setCommitments(commitmentsData);
 
         console.log(`✅ Loaded project "${projectData.name}" with ${commitmentsData.length} commitments`);
+
+        // Step 3: Verify project metadata in background
+        const projectVerificationResult = await loadProjectWithVerification(bucketId);
+        if (projectVerificationResult.data) {
+          setProject({ ...projectVerificationResult.data, bucketId });
+        }
+        setProjectVerification(
+          projectVerificationResult.verification.verified ? 'verified' : 'failed'
+        );
+
+        // Step 4: Verify commitments in background
+        const commitmentsVerificationResult = await loadCommitmentsWithVerification(bucketId);
+        
+        // Update commitments with verified data
+        const verifiedCommitments = commitmentsVerificationResult.map((r) => r.data);
+        setCommitments(verifiedCommitments);
+
+        // Store verification results
+        const verifications = new Map<string, VerificationStatus>();
+        commitmentsVerificationResult.forEach(({ data, verification }) => {
+          verifications.set(
+            data.id,
+            verification.verified ? 'verified' : verification.reason?.includes('INTEGRITY FAILURE') ? 'failed' : 'unavailable'
+          );
+        });
+        setCommitmentVerifications(verifications);
+
+        // Log verification warnings if any
+        commitmentsVerificationResult.forEach(({ data, verification }) => {
+          if (!verification.verified) {
+            console.warn(
+              `⚠️ Verification failed for commitment ${data.id}: ${verification.reason}`
+            );
+          }
+        });
       } catch (err) {
         console.error('Failed to load project:', err);
         setError('Failed to load project data');
+        setProjectVerification('unavailable');
       } finally {
         setIsLoading(false);
       }
     };
 
     loadData();
-  }, [isInitialized, bucketId, loadProject, loadCommitments]);
+  }, [
+    isInitialized,
+    bucketId,
+    loadProject,
+    loadCommitments,
+    loadProjectWithVerification,
+    loadCommitmentsWithVerification,
+  ]);
 
   // Handle commitment status update
   const handleStatusUpdate = useCallback(
@@ -239,7 +291,14 @@ export default function ProjectDetailPage() {
                   </span>
                 </div>
                 <div className="flex-1">
-                  <h1 className="text-2xl font-bold sm:text-3xl">{project.name}</h1>
+                  <div className="flex items-center gap-2">
+                    <h1 className="text-2xl font-bold sm:text-3xl">{project.name}</h1>
+                    <VerificationBadge
+                      status={projectVerification}
+                      size="sm"
+                      showLabel={false}
+                    />
+                  </div>
                   <div className="mt-2 flex flex-wrap items-center gap-2">
                     <Badge variant="outline">
                       {PROJECT_CATEGORY_LABELS[project.category]}
@@ -326,6 +385,7 @@ export default function ProjectDetailPage() {
                   commitments={commitments}
                   isOwner={isOwner}
                   onStatusUpdate={handleStatusUpdate}
+                  verificationStatuses={commitmentVerifications}
                 />
               ) : (
                 <Card className="border-border/40">

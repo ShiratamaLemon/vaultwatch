@@ -110,10 +110,34 @@ export interface DownloadResponse {
  */
 export interface VerificationResult {
   verified: boolean;
-  onChainRoot?: string;
-  expectedRoot?: string;
+  onChainFingerprint?: string;
+  calculatedFingerprint?: string;
   reason?: string;
   error?: unknown;
+}
+
+/**
+ * Data integrity verification status
+ */
+export type VerificationStatus =
+  | 'verified'      // Data integrity confirmed
+  | 'unverified'    // Verification not performed
+  | 'failed'        // Verification failed (mismatch)
+  | 'pending'       // Verification in progress
+  | 'unavailable';  // Cannot verify (missing on-chain data)
+
+/**
+ * Extended download result with verification
+ */
+export interface VerifiedDownloadResult<T = unknown> {
+  data: T;
+  verification: {
+    status: VerificationStatus;
+    onChainFingerprint?: string;
+    calculatedFingerprint?: string;
+    reason?: string;
+    verifiedAt?: number;
+  };
 }
 
 /**

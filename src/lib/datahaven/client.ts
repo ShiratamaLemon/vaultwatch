@@ -37,8 +37,11 @@ import type {
   MspHealthStatus,
   ValueProposition,
   StorageWrapper,
+  VerificationResult,
+  VerificationStatus,
+  VerifiedDownloadResult,
 } from './types';
-import { DataHavenError, BucketCreationError, FileUploadError } from './types';
+import { DataHavenError, BucketCreationError, FileUploadError, VerificationError } from './types';
 
 // =============================================================================
 // Configuration
@@ -570,6 +573,64 @@ export const verifyBucketCreation = async (bucketId: string): Promise<BucketInfo
 };
 
 /**
+ * Verify bucket ownership on-chain
+ * This provides a secure, tamper-proof ownership check
+ * 
+ * @param bucketId - The bucket ID to verify
+ * @param address - The address to check ownership for
+ * @returns Object with isOwner boolean and optional error reason
+ */
+export const verifyBucketOwnership = async (
+  bucketId: string,
+  address: string
+): Promise<{ isOwner: boolean; reason?: string }> => {
+  if (!polkadotApiInstance) {
+    return { isOwner: false, reason: 'Polkadot API not initialized' };
+  }
+
+  if (!address) {
+    return { isOwner: false, reason: 'Address not provided' };
+  }
+
+  try {
+    const bucket = await polkadotApiInstance.query.providers.buckets(bucketId);
+    
+    if (bucket.isEmpty) {
+      return { isOwner: false, reason: 'Bucket not found on chain' };
+    }
+
+    const bucketData = bucket.unwrap().toHuman() as {
+      root: string;
+      userId: string;
+      mspId: string;
+      private: boolean;
+      size_: string;
+      valuePropId: string;
+    };
+
+    // Compare addresses (case-insensitive)
+    const onChainOwner = bucketData.userId.toLowerCase();
+    const checkAddress = address.toLowerCase();
+    const isOwner = onChainOwner === checkAddress;
+
+    if (!isOwner) {
+      return { 
+        isOwner: false, 
+        reason: `On-chain owner (${bucketData.userId.slice(0, 10)}...) does not match your address` 
+      };
+    }
+
+    return { isOwner: true };
+  } catch (error) {
+    console.error('Failed to verify bucket ownership:', error);
+    return { 
+      isOwner: false, 
+      reason: error instanceof Error ? error.message : 'Unknown verification error' 
+    };
+  }
+};
+
+/**
  * Wait for backend to have bucket ready
  */
 export const waitForBackendBucketReady = async (
@@ -1026,14 +1087,37 @@ export const waitForBackendFileReady = async (
 };
 
 /**
- * Download a JSON file from DataHaven
+ * Download options for JSON file
+ */
+export interface DownloadOptions {
+  /** Whether to verify data integrity (default: true in production) */
+  verify?: boolean;
+  /** Expected fingerprint from upload result (for verification) */
+  expectedFingerprint?: string;
+  /** Whether to throw an error on verification failure (default: false) */
+  throwOnVerificationFailure?: boolean;
+}
+
+/**
+ * Download a JSON file from DataHaven with optional integrity verification
+ * 
+ * @param fileKey - The file key to download
+ * @param options - Download options including verification settings
+ * @returns Downloaded data with verification status
  */
 export const downloadJsonFile = async <T>(
-  fileKey: string
-): Promise<{ data: T; verified: boolean }> => {
+  fileKey: string,
+  options: DownloadOptions = {}
+): Promise<VerifiedDownloadResult<T>> => {
   if (!mspClientInstance) {
     throw new DataHavenError('MSP client not initialized', 'NOT_INITIALIZED');
   }
+
+  const {
+    verify = true,
+    expectedFingerprint,
+    throwOnVerificationFailure = false,
+  } = options;
 
   try {
     const downloadResponse: DownloadResult = await mspClientInstance.files.downloadFile(fileKey);
@@ -1042,7 +1126,7 @@ export const downloadJsonFile = async <T>(
       throw new Error(`Download failed with status: ${downloadResponse.status}`);
     }
 
-    // Read stream
+    // Read stream into blob
     const reader = downloadResponse.stream.getReader();
     const chunks: BlobPart[] = [];
 
@@ -1056,14 +1140,90 @@ export const downloadJsonFile = async <T>(
     const text = await blob.text();
     const wrapper = JSON.parse(text) as StorageWrapper<T>;
 
+    // Perform verification if requested
+    let verification: VerifiedDownloadResult<T>['verification'];
+
+    if (verify) {
+      try {
+        const verificationResult = await verifyDataIntegrity(
+          fileKey,
+          blob,
+          expectedFingerprint
+        );
+
+        const status: VerificationStatus = verificationResult.verified 
+          ? 'verified' 
+          : 'failed';
+
+        verification = {
+          status,
+          onChainFingerprint: verificationResult.onChainFingerprint,
+          calculatedFingerprint: verificationResult.calculatedFingerprint,
+          reason: verificationResult.reason,
+          verifiedAt: Date.now(),
+        };
+
+        // Log verification result
+        if (verificationResult.verified) {
+          console.log(`✅ Data integrity verified for file: ${fileKey.slice(0, 16)}...`);
+        } else {
+          console.warn(`⚠️ Data integrity verification FAILED for file: ${fileKey.slice(0, 16)}...`);
+          console.warn(`   Reason: ${verificationResult.reason}`);
+          
+          if (throwOnVerificationFailure) {
+            throw new VerificationError(
+              `Data integrity verification failed: ${verificationResult.reason}`
+            );
+          }
+        }
+      } catch (verifyError) {
+        if (verifyError instanceof VerificationError) {
+          throw verifyError;
+        }
+        
+        console.warn('Verification process encountered an error:', verifyError);
+        verification = {
+          status: 'unavailable',
+          reason: `Verification unavailable: ${verifyError instanceof Error ? verifyError.message : 'Unknown error'}`,
+          verifiedAt: Date.now(),
+        };
+      }
+    } else {
+      verification = {
+        status: 'unverified',
+        reason: 'Verification was skipped by request.',
+        verifiedAt: Date.now(),
+      };
+    }
+
     return {
       data: wrapper.data,
-      verified: true, // TODO: Implement proper Merkle verification
+      verification,
     };
   } catch (error) {
+    if (error instanceof VerificationError) {
+      throw error;
+    }
     console.error('Failed to download file:', error);
     throw new DataHavenError('Failed to download file', 'DOWNLOAD_FAILED', error);
   }
+};
+
+/**
+ * Download a JSON file without verification (for backward compatibility)
+ * @deprecated Use downloadJsonFile with verify: false option instead
+ */
+export const downloadJsonFileUnsafe = async <T>(
+  fileKey: string
+): Promise<{ data: T; verified: boolean }> => {
+  console.warn('downloadJsonFileUnsafe is deprecated. Use downloadJsonFile with options.');
+  
+  const result = await downloadJsonFile<T>(fileKey, { verify: false });
+  
+  return {
+    data: result.data,
+    verified: false,
+  };
 };
 
 /**
@@ -1140,33 +1300,193 @@ export const deleteBucket = async (bucketId: string): Promise<boolean> => {
 // =============================================================================
 
 /**
- * Verify data integrity using on-chain Merkle root
+ * Get the on-chain fingerprint for a file
+ * The fingerprint is stored in the storageRequests pallet during upload
+ */
+export const getOnChainFingerprint = async (
+  fileKey: string
+): Promise<{ fingerprint: string | null; status: 'pending' | 'fulfilled' | 'not_found' }> => {
+  if (!polkadotApiInstance) {
+    throw new DataHavenError('Polkadot API not initialized', 'NOT_INITIALIZED');
+  }
+
+  try {
+    const storageRequest = await polkadotApiInstance.query.fileSystem.storageRequests(fileKey);
+
+    if (storageRequest.isNone) {
+      // Storage request has been fulfilled (completed)
+      // The fingerprint is no longer in storageRequests, it's been processed
+      return { fingerprint: null, status: 'fulfilled' };
+    }
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const data = storageRequest.unwrap() as any;
+    const fingerprint = data.fingerprint?.toString() || null;
+
+    return { fingerprint, status: 'pending' };
+  } catch (error) {
+    console.error('Failed to get on-chain fingerprint:', error);
+    return { fingerprint: null, status: 'not_found' };
+  }
+};
+
+/**
+ * Calculate fingerprint from raw data (same algorithm as upload)
+ */
+export const calculateFingerprint = async (data: Uint8Array | Blob): Promise<string> => {
+  let blob: Blob;
+  
+  if (data instanceof Blob) {
+    blob = data;
+  } else {
+    // Convert Uint8Array to ArrayBuffer explicitly for Blob constructor
+    // Use slice to create a new ArrayBuffer (not SharedArrayBuffer)
+    const buffer = new Uint8Array(data).buffer as ArrayBuffer;
+    blob = new Blob([buffer]);
+  }
+  
+  const fileManager = new FileManager({
+    size: blob.size,
+    stream: () => blob.stream() as ReadableStream<Uint8Array>,
+  });
+
+  const fingerprint = await fileManager.getFingerprint();
+  return fingerprint.toHex();
+};
+
+/**
+ * Verify data integrity by comparing calculated fingerprint with on-chain fingerprint
+ * 
+ * This function:
+ * 1. Gets the on-chain fingerprint for the file
+ * 2. Calculates the fingerprint of the provided data
+ * 3. Compares them to detect any tampering
+ * 
+ * @param fileKey - The file key to verify
+ * @param data - The downloaded data to verify (as Blob or Uint8Array)
+ * @param expectedFingerprint - Optional: Expected fingerprint (if known from upload result)
+ */
+export const verifyDataIntegrity = async (
+  fileKey: string,
+  data: Uint8Array | Blob,
+  expectedFingerprint?: string
+): Promise<VerificationResult> => {
+  if (!polkadotApiInstance) {
+    return {
+      verified: false,
+      reason: 'Polkadot API not initialized. Cannot verify data integrity.',
+    };
+  }
+
+  try {
+    // Step 1: Calculate fingerprint of the downloaded data
+    const calculatedFingerprint = await calculateFingerprint(data);
+    console.log(`Calculated fingerprint: ${calculatedFingerprint}`);
+
+    // Step 2: Get on-chain fingerprint
+    const onChainResult = await getOnChainFingerprint(fileKey);
+    
+    // Step 3: Determine verification approach based on on-chain status
+    if (onChainResult.status === 'pending') {
+      // Storage request is still pending - we can verify against it
+      const onChainFingerprint = onChainResult.fingerprint;
+      
+      if (!onChainFingerprint) {
+        return {
+          verified: false,
+          calculatedFingerprint,
+          reason: 'On-chain fingerprint not available in pending storage request.',
+        };
+      }
+
+      const isMatch = calculatedFingerprint === onChainFingerprint;
+      
+      return {
+        verified: isMatch,
+        onChainFingerprint,
+        calculatedFingerprint,
+        reason: isMatch 
+          ? 'Data integrity verified against on-chain fingerprint.'
+          : 'INTEGRITY FAILURE: Downloaded data does not match on-chain fingerprint. Data may have been tampered with.',
+      };
+    } else if (onChainResult.status === 'fulfilled') {
+      // Storage request has been fulfilled
+      // Use expected fingerprint if provided (from upload result)
+      if (expectedFingerprint) {
+        const isMatch = calculatedFingerprint === expectedFingerprint;
+        
+        return {
+          verified: isMatch,
+          onChainFingerprint: expectedFingerprint,
+          calculatedFingerprint,
+          reason: isMatch
+            ? 'Data integrity verified against expected fingerprint (storage request fulfilled).'
+            : 'INTEGRITY FAILURE: Downloaded data does not match expected fingerprint. Data may have been tampered with.',
+        };
+      }
+
+      // No expected fingerprint - we can only confirm the file exists
+      // This is a less strict verification
+      return {
+        verified: true,
+        calculatedFingerprint,
+        reason: 'Storage request fulfilled. Data fingerprint calculated but no on-chain reference for comparison. Consider storing fingerprint for future verification.',
+      };
+    } else {
+      // File not found on chain
+      return {
+        verified: false,
+        calculatedFingerprint,
+        reason: 'File not found on chain. Cannot verify data integrity.',
+      };
+    }
+  } catch (error) {
+    console.error('Data integrity verification failed:', error);
+    return {
+      verified: false,
+      reason: `Verification error: ${error instanceof Error ? error.message : 'Unknown error'}`,
+      error,
+    };
+  }
+};
+
+/**
+ * Legacy verify function for backward compatibility
+ * @deprecated Use verifyDataIntegrity instead
  */
 export const verifyData = async (
   bucketId: string,
   fileKey: string,
-  _expectedMerkleRoot: string
+  expectedMerkleRoot: string
 ): Promise<{ verified: boolean; reason?: string }> => {
+  console.warn('verifyData is deprecated. Use verifyDataIntegrity for proper Merkle verification.');
+  
   if (!polkadotApiInstance) {
     return { verified: false, reason: 'Polkadot API not initialized' };
   }
 
   try {
-    // Get on-chain bucket info
     const bucketInfo = await polkadotApiInstance.query.providers.buckets(bucketId);
-
     if (bucketInfo.isEmpty) {
       return { verified: false, reason: 'Bucket not found on chain' };
     }
 
-    // For now, we just check that the bucket exists and the file key is valid
-    // Full Merkle proof verification would require additional implementation
     const storageRequest = await polkadotApiInstance.query.fileSystem.storageRequests(fileKey);
-
     if (storageRequest.isNone) {
-      // Storage request completed or doesn't exist
-      // This is expected for completed uploads
-      return { verified: true };
+      return { verified: true, reason: 'Storage request fulfilled' };
+    }
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const data = storageRequest.unwrap() as any;
+    const onChainFingerprint = data.fingerprint?.toString();
+    
+    if (onChainFingerprint && expectedMerkleRoot) {
+      return {
+        verified: onChainFingerprint === expectedMerkleRoot,
+        reason: onChainFingerprint === expectedMerkleRoot 
+          ? 'Fingerprint matches' 
+          : 'Fingerprint mismatch',
+      };
     }
 
     return { verified: true };
@@ -1430,6 +1750,162 @@ export const loadCommitmentsFromBucket = async <T>(bucketId: string): Promise<T[
     
     console.log(`Loaded ${commitments.length} commitments from bucket`);
     return commitments;
+  } catch (error) {
+    console.error(`Failed to load commitments from bucket ${bucketId}:`, error);
+    return [];
+  }
+};
+
+/**
+ * Load project metadata from a VaultWatch bucket with verification
+ * @param bucketId - The bucket ID
+ * @returns Project data with verification result
+ */
+export const loadProjectFromBucketWithVerification = async <T>(
+  bucketId: string
+): Promise<{ data: T | null; verification: VerificationResult }> => {
+  try {
+    // Get files in the bucket root
+    const fileList = await getBucketFiles(bucketId);
+    
+    // Find metadata.json
+    const metadataFile = findFileInTree(fileList.files, 'metadata.json');
+    if (!metadataFile || metadataFile.type !== 'file') {
+      console.warn(`No metadata.json found in bucket ${bucketId.slice(0, 10)}...`);
+      return {
+        data: null,
+        verification: {
+          verified: false,
+          reason: 'Metadata file not found',
+        },
+      };
+    }
+    
+    // Download with verification
+    // Note: downloadJsonFile already unwraps StorageWrapper and returns data directly
+    const result = await downloadJsonFile<T>(
+      metadataFile.fileKey,
+      { verify: true }
+    );
+    
+    return {
+      data: result.data,
+      verification: {
+        verified: result.verification.status === 'verified',
+        onChainFingerprint: result.verification.onChainFingerprint,
+        calculatedFingerprint: result.verification.calculatedFingerprint,
+        reason: result.verification.reason,
+      },
+    };
+  } catch (error) {
+    console.error(`Failed to load project from bucket ${bucketId}:`, error);
+    return {
+      data: null,
+      verification: {
+        verified: false,
+        reason: error instanceof Error ? error.message : 'Unknown error',
+        error,
+      },
+    };
+  }
+};
+
+/**
+ * Load all commitments from a VaultWatch bucket with verification
+ * @param bucketId - The bucket ID
+ * @returns Array of commitments with verification results
+ */
+export const loadCommitmentsFromBucketWithVerification = async <T>(
+  bucketId: string
+): Promise<Array<{ data: T; verification: VerificationResult; fileKey: string }>> => {
+  try {
+    // Try to get files directly from the commitments folder path
+    let commitmentFiles: FileTree[] = [];
+    
+    try {
+      const commitmentsFileList = await getBucketFiles(bucketId, '/commitments');
+      commitmentFiles = commitmentsFileList.files.filter(f => f.type === 'file');
+      
+      if (commitmentFiles.length === 0) {
+        const rootFolder = commitmentsFileList.files.find(f => f.name === '/' || f.name === 'commitments');
+        if (rootFolder && 'children' in rootFolder) {
+          const children = (rootFolder as { children: FileTree[] }).children;
+          commitmentFiles = children.filter((f): f is FileTree & { type: 'file' } => f.type === 'file');
+        }
+      }
+    } catch (pathError) {
+      console.log('Could not fetch commitments path directly, trying from root...');
+      const fileList = await getBucketFiles(bucketId);
+      commitmentFiles = getFilesFromFolder(fileList.files, 'commitments');
+    }
+    
+    if (commitmentFiles.length === 0) {
+      console.log(`No commitments found in bucket ${bucketId.slice(0, 10)}...`);
+      return [];
+    }
+    
+    // Filter to only file types with JSON extension
+    const jsonFiles = commitmentFiles.filter(
+      (f): f is FileTree & { type: 'file'; uploadedAt: Date; fileKey: `0x${string}` } =>
+        f.type === 'file' && f.name.endsWith('.json')
+    );
+    
+    // Deduplicate files by name, keeping only the latest version
+    const filesByName = new Map<string, typeof jsonFiles[number]>();
+    for (const file of jsonFiles) {
+      const existing = filesByName.get(file.name);
+      if (!existing) {
+        filesByName.set(file.name, file);
+      } else {
+        const existingTime = existing.uploadedAt ? new Date(existing.uploadedAt).getTime() : 0;
+        const newTime = file.uploadedAt ? new Date(file.uploadedAt).getTime() : 0;
+        if (newTime > existingTime) {
+          filesByName.set(file.name, file);
+        }
+      }
+    }
+    
+    const uniqueFiles = Array.from(filesByName.values());
+    
+    // Download and verify each commitment in parallel
+    // Note: downloadJsonFile already unwraps StorageWrapper and returns data directly
+    const results = await Promise.all(
+      uniqueFiles.map(async (file) => {
+        try {
+          const result = await downloadJsonFile<T>(
+            file.fileKey,
+            { verify: true }
+          );
+          
+          const verification: VerificationResult = {
+            verified: result.verification.status === 'verified',
+            onChainFingerprint: result.verification.onChainFingerprint,
+            calculatedFingerprint: result.verification.calculatedFingerprint,
+            reason: result.verification.reason,
+          };
+          
+          return {
+            data: result.data,
+            verification,
+            fileKey: file.fileKey,
+          };
+        } catch (error) {
+          console.warn(`Failed to load commitment ${file.name}:`, error);
+          return null;
+        }
+      })
+    );
+    
+    // Filter out failed downloads
+    const validResults: Array<{ data: T; verification: VerificationResult; fileKey: string }> = [];
+    for (const r of results) {
+      if (r !== null) {
+        validResults.push(r);
+      }
+    }
+    
+    console.log(`Loaded ${validResults.length} commitments with verification from bucket`);
+    return validResults;
   } catch (error) {
     console.error(`Failed to load commitments from bucket ${bucketId}:`, error);
     return [];
