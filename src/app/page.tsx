@@ -12,6 +12,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Container } from '@/components/layout/Container';
+import { HomeStats } from '@/components/home/HomeStats';
 
 const features = [
   {
@@ -38,12 +39,6 @@ const features = [
     description:
       'See the complete history of project announcements, roadmaps, and updates with precise timestamps.',
   },
-];
-
-const stats = [
-  { label: 'Projects Tracked', value: '0' },
-  { label: 'Commitments Recorded', value: '0' },
-  { label: 'Verified Records', value: '100%' },
 ];
 
 export default function HomePage() {
@@ -100,22 +95,7 @@ export default function HomePage() {
       </section>
 
       {/* Stats Section */}
-      <section className="border-y border-border/40 bg-muted/30 py-12">
-        <Container>
-          <div className="grid grid-cols-1 gap-8 sm:grid-cols-3">
-            {stats.map((stat) => (
-              <div key={stat.label} className="text-center">
-                <div className="text-3xl font-bold text-emerald-400 sm:text-4xl">
-                  {stat.value}
-                </div>
-                <div className="mt-1 text-sm text-muted-foreground">
-                  {stat.label}
-                </div>
-              </div>
-            ))}
-          </div>
-        </Container>
-      </section>
+      <HomeStats />
 
       {/* Features Section */}
       <section className="py-20 sm:py-32">
