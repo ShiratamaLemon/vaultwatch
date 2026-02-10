@@ -11,6 +11,7 @@ frontend:
     build:
       commands:
         - pnpm build
+        - rm -rf .next/cache
   artifacts:
     baseDirectory: .next
     files:
@@ -18,4 +19,3 @@ frontend:
   cache:
     paths:
       - node_modules/**/*
-      - .next/cache/**/*
