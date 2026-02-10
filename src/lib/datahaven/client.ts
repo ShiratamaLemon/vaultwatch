@@ -1708,9 +1708,53 @@ export const loadProjectFromBucket = async <T>(bucketId: string): Promise<T | nu
 };
 
 /**
+ * Check if a single bucket contains a VaultWatch project.
+ * @returns Project data if found, null otherwise
+ */
+const probeVaultWatchBucket = async <T>(
+  bucketId: string,
+  ownerAddress: string
+): Promise<{ bucketId: string; ownerAddress: string; project: T } | null> => {
+  try {
+    const fileList = await getBucketFiles(bucketId);
+    const metadataFile = findFileInTree(fileList.files, 'metadata.json');
+    if (!metadataFile || metadataFile.type !== 'file') return null;
+
+    const wrapper = await downloadAndParseJson<StorageWrapper<T>>(metadataFile.fileKey);
+
+    // Primary check: app identifier
+    if (wrapper.app === VAULTWATCH_APP_ID && wrapper.type === 'project') {
+      return { bucketId, ownerAddress, project: wrapper.data };
+    }
+
+    // Fallback: check for VaultWatch-specific data fields (legacy data without app field)
+    if (
+      wrapper.type === 'project' &&
+      wrapper.version === '1.0' &&
+      wrapper.data &&
+      typeof wrapper.data === 'object' &&
+      'ownerAddress' in wrapper.data &&
+      'category' in wrapper.data &&
+      'bucketId' in wrapper.data
+    ) {
+      return { bucketId, ownerAddress, project: wrapper.data };
+    }
+
+    return null;
+  } catch {
+    return null;
+  }
+};
+
+/** Concurrency limit for bucket probing */
+const DISCOVERY_CONCURRENCY = 10;
+
+/**
  * Discover VaultWatch projects by scanning all on-chain buckets.
  * For each bucket, attempts to load metadata.json from MSP and checks
  * if it matches the VaultWatch format (app === "vaultwatch" or has VaultWatch-specific fields).
+ *
+ * Uses parallel batch processing for performance.
  *
  * @returns Array of discovered bucket IDs with their project metadata
  */
@@ -1726,61 +1770,37 @@ export const discoverVaultWatchBuckets = async <T>(): Promise<
     const allBuckets = await polkadotApiInstance.query.providers.buckets.entries();
     console.log(`Scanning ${allBuckets.length} on-chain buckets for VaultWatch projects...`);
 
-    const results: Array<{ bucketId: string; ownerAddress: string; project: T }> = [];
-
-    // Step 2: For each bucket, try to load metadata.json
+    // Step 2: Filter to public buckets with their IDs
+    const candidates: Array<{ bucketId: string; ownerAddress: string }> = [];
     for (const [key, value] of allBuckets) {
       if (value.isEmpty) continue;
-
-      const bucketId = key.args[0].toString();
       const bucketData = value.unwrap().toHuman() as {
         root: string;
         userId: string;
         mspId: string;
         private: boolean;
       };
-
-      // Skip private buckets
       if (bucketData.private) continue;
+      candidates.push({
+        bucketId: key.args[0].toString(),
+        ownerAddress: bucketData.userId,
+      });
+    }
 
-      try {
-        // Try to get files from MSP
-        const fileList = await getBucketFiles(bucketId);
-        const metadataFile = findFileInTree(fileList.files, 'metadata.json');
-        if (!metadataFile || metadataFile.type !== 'file') continue;
+    console.log(`${candidates.length} public buckets to probe (concurrency: ${DISCOVERY_CONCURRENCY})`);
 
-        // Download and check format
-        const wrapper = await downloadAndParseJson<StorageWrapper<T>>(metadataFile.fileKey);
+    // Step 3: Probe in parallel batches
+    const results: Array<{ bucketId: string; ownerAddress: string; project: T }> = [];
 
-        // Primary check: app identifier
-        if (wrapper.app === VAULTWATCH_APP_ID && wrapper.type === 'project') {
-          results.push({
-            bucketId,
-            ownerAddress: bucketData.userId,
-            project: wrapper.data,
-          });
-          continue;
-        }
-
-        // Fallback: check for VaultWatch-specific data fields (legacy data without app field)
-        if (
-          wrapper.type === 'project' &&
-          wrapper.version === '1.0' &&
-          wrapper.data &&
-          typeof wrapper.data === 'object' &&
-          'ownerAddress' in wrapper.data &&
-          'category' in wrapper.data &&
-          'bucketId' in wrapper.data
-        ) {
-          results.push({
-            bucketId,
-            ownerAddress: bucketData.userId,
-            project: wrapper.data,
-          });
-        }
-      } catch {
-        // Skip buckets that can't be read (not VaultWatch, MSP error, etc.)
-        continue;
+    for (let i = 0; i < candidates.length; i += DISCOVERY_CONCURRENCY) {
+      const batch = candidates.slice(i, i + DISCOVERY_CONCURRENCY);
+      const batchResults = await Promise.all(
+        batch.map(({ bucketId, ownerAddress }) =>
+          probeVaultWatchBucket<T>(bucketId, ownerAddress)
+        )
+      );
+      for (const r of batchResults) {
+        if (r) results.push(r);
       }
     }
 

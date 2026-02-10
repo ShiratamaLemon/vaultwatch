@@ -670,8 +670,37 @@ export const useDataHaven = (): UseDataHavenReturn => {
       }
     }
 
-    // Read-only mode: discover VaultWatch projects from on-chain bucket scan
+    // Read-only mode: use cache if fresh, otherwise discover from on-chain
     if (isReadOnlyReady) {
+      const CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
+      const store = useProjectStore.getState();
+      const cacheAge = store.lastSyncedAt ? Date.now() - store.lastSyncedAt : Infinity;
+
+      // Serve from cache if fresh
+      if (store.projects.length > 0 && cacheAge < CACHE_TTL_MS) {
+        console.log(`✅ Using cached projects (age: ${Math.round(cacheAge / 1000)}s)`);
+        const { loadProjectFromBucket } = await import('@/lib/datahaven/client');
+
+        const results: Array<{ bucket: Bucket; project: Project | null }> = [];
+        for (const cached of store.projects) {
+          const project = await loadProjectFromBucket<Project>(cached.bucketId);
+          results.push({
+            bucket: {
+              bucketId: cached.bucketId as `0x${string}`,
+              name: `vaultwatch-${cached.id}`,
+              root: '0x' as `0x${string}`,
+              isPublic: true,
+              sizeBytes: 0,
+              valuePropId: '',
+              fileCount: cached.commitmentCount + 1,
+            },
+            project,
+          });
+        }
+        return results;
+      }
+
+      // Cache miss or stale: full on-chain discovery
       setIsLoading(true);
       setError(null);
 
