@@ -85,9 +85,8 @@ export default function ProjectDetailPage() {
     id: string;
   } | null>(null);
 
-  // Refs to prevent concurrent/duplicate loads and avoid unstable function deps
+  // Refs to prevent concurrent loads and avoid unstable function deps
   const loadingRef = useRef(false);
-  const hasLoadedRef = useRef<string | null>(null);
   const fnRefs = useRef({ loadProject, loadCommitments, loadProjectWithVerification, loadCommitmentsWithVerification });
   fnRefs.current = { loadProject, loadCommitments, loadProjectWithVerification, loadCommitmentsWithVerification };
 
@@ -95,7 +94,7 @@ export default function ProjectDetailPage() {
   useEffect(() => {
     const loadData = async () => {
       if ((!isReadOnlyReady && !isInitialized) || !bucketId) return;
-      if (loadingRef.current || hasLoadedRef.current === bucketId) return;
+      if (loadingRef.current) return;
       loadingRef.current = true;
 
       setIsLoading(true);
@@ -168,8 +167,6 @@ export default function ProjectDetailPage() {
         });
         setCommitmentVerifications(verifications);
         setCommitmentVerificationDetails(verificationDetailMap);
-
-        hasLoadedRef.current = bucketId;
 
         // Log verification warnings if any
         commitmentsVerificationResult.forEach(({ data, verification }) => {

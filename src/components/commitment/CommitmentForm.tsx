@@ -60,6 +60,8 @@ export const CommitmentForm = ({ projectId, bucketId }: CommitmentFormProps) => 
     uploadBinaryFile,
     initialize,
     verifyBucketOwnership,
+    waitForMSPConfirm,
+    waitForBackendFileReady,
   } = useDataHaven();
 
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -254,6 +256,22 @@ export const CommitmentForm = ({ projectId, bucketId }: CommitmentFormProps) => 
       console.log('✅ Commitment created with txHash');
       console.log('📋 Final TX Hash:', finalUploadResult.txHash);
       console.log('🔑 Final File Key:', finalUploadResult.fileKey);
+
+      // Wait for MSP to confirm storage on-chain (ensures file persistence)
+      toast.info('Waiting for storage confirmation...');
+      try {
+        await waitForMSPConfirm(finalUploadResult.fileKey);
+        console.log('✅ MSP confirmed storage request on-chain');
+      } catch {
+        console.warn('⚠️ MSP on-chain confirmation wait timed out');
+      }
+
+      // Wait for MSP backend to index the file so it appears in listings
+      try {
+        await waitForBackendFileReady(bucketId, finalUploadResult.fileKey);
+      } catch {
+        console.warn('Backend file indexing wait timed out, proceeding anyway');
+      }
 
       // Update project in store
       const project = projects.find((p) => p.id === projectId);

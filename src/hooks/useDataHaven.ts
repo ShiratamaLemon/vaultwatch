@@ -157,6 +157,10 @@ interface UseDataHavenReturn {
     file: File | Blob,
   ) => Promise<{ fileKey: string; fileName: string; fileSize: number; fileType: string } | null>;
   downloadBinaryFile: (fileKey: string) => Promise<Blob | null>;
+
+  // Backend sync
+  waitForBackendFileReady: (bucketId: string, fileKey: string) => Promise<void>;
+  waitForMSPConfirm: (fileKey: string) => Promise<void>;
 }
 
 export const useDataHaven = (): UseDataHavenReturn => {
@@ -1059,6 +1063,15 @@ export const useDataHaven = (): UseDataHavenReturn => {
         console.log('📋 Final TX Hash:', finalResult.txHash);
         console.log('🔑 Final File Key:', finalResult.fileKey);
 
+        // Wait for MSP to confirm storage request on-chain (ensures file persistence)
+        try {
+          const { waitForMSPConfirmOnChain } = await import('@/lib/datahaven/client');
+          await waitForMSPConfirmOnChain(finalResult.fileKey);
+          console.log('✅ MSP confirmed storage request on-chain');
+        } catch (confirmErr) {
+          console.warn('⚠️ MSP on-chain confirmation wait failed:', confirmErr);
+        }
+
         return {
           success: true,
           fileKey: finalResult.fileKey,
@@ -1164,6 +1177,34 @@ export const useDataHaven = (): UseDataHavenReturn => {
     [isReadOnlyReady, isInitialized]
   );
 
+  /**
+   * Wait for a file to be indexed in the MSP backend
+   * Call after upload to ensure the file appears in bucket listings
+   */
+  const waitForFileReady = useCallback(
+    async (bucketId: string, fileKey: string): Promise<void> => {
+      if (!isReadOnlyReady && !isInitialized) return;
+
+      const { waitForBackendFileReady: waitFn } = await import('@/lib/datahaven/client');
+      await waitFn(bucketId, fileKey);
+    },
+    [isReadOnlyReady, isInitialized]
+  );
+
+  /**
+   * Wait for MSP to confirm storage request on-chain
+   * This ensures the file is permanently stored (not just temporarily held)
+   */
+  const waitForMSPConfirm = useCallback(
+    async (fileKey: string): Promise<void> => {
+      if (!isReadOnlyReady && !isInitialized) return;
+
+      const { waitForMSPConfirmOnChain } = await import('@/lib/datahaven/client');
+      await waitForMSPConfirmOnChain(fileKey);
+    },
+    [isReadOnlyReady, isInitialized]
+  );
+
   // Auto-initialize read-only when WASM is ready (no wallet needed)
   // Module-level promise dedup prevents concurrent init from multiple instances
   useEffect(() => {
@@ -1230,6 +1271,9 @@ export const useDataHaven = (): UseDataHavenReturn => {
     // Binary file operations
     uploadBinaryFile,
     downloadBinaryFile,
+    // Backend sync
+    waitForBackendFileReady: waitForFileReady,
+    waitForMSPConfirm,
   };
 };
 
