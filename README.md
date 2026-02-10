@@ -4,6 +4,18 @@
 
 VaultWatch is a platform that records crypto project transparency in a verifiable way. It leverages DataHaven decentralized storage to store project "promises" in a tamper-proof manner.
 
+## 🔑 Key Innovation: Two-Stage Upload for Data Integrity
+
+VaultWatch implements a unique two-stage upload pattern to ensure cryptographic linkage between on-chain and off-chain data:
+
+1. First upload → get transaction hash and file key
+2. Second upload → embed the hash into the data itself
+3. Result: On-chain and off-chain data are cryptographically bound at hash level
+
+This design prevents tampering and enables Merkle proof verification of data integrity.
+
+**Design rationale:** I identified the risk of on-chain/off-chain inconsistency when using decentralized storage, and designed this pattern to address it.
+
 ## 📊 Development Status
 
 | Status | Description |

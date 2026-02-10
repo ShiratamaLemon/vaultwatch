@@ -2,7 +2,7 @@
 
 import { useState, useMemo, useEffect } from 'react';
 import { useAccount } from 'wagmi';
-import { Loader2, Wallet } from 'lucide-react';
+import { Loader2, Info } from 'lucide-react';
 import { Container } from '@/components/layout/Container';
 import { ProjectList, ProjectSearch } from '@/components/project';
 import { useDataHaven } from '@/hooks/useDataHaven';
@@ -11,10 +11,11 @@ import type { ProjectCategory, ProjectIndexEntry } from '@/types';
 
 export default function ProjectsPage() {
   const { isConnected } = useAccount();
-  const { 
-    isInitialized, 
+  const {
+    isInitialized,
+    isReadOnlyReady,
     isLoading: isDataHavenLoading,
-    listVaultWatchProjects 
+    listVaultWatchProjects
   } = useDataHaven();
 
   const [projects, setProjects] = useState<ProjectIndexEntry[]>([]);
@@ -23,15 +24,15 @@ export default function ProjectsPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<ProjectCategory | 'all'>('all');
 
-  // Load projects from MSP when initialized
+  // Load projects when read-only or full initialization is ready
   useEffect(() => {
     const loadProjects = async () => {
-      if (!isInitialized || hasLoaded || isLoading) return;
+      if (!(isReadOnlyReady || isInitialized) || hasLoaded || isLoading) return;
 
       setIsLoading(true);
       try {
         const results = await listVaultWatchProjects();
-        
+
         // Convert to ProjectIndexEntry format
         const indexEntries: ProjectIndexEntry[] = results
           .filter(({ project }) => project !== null)
@@ -57,7 +58,15 @@ export default function ProjectsPage() {
     };
 
     loadProjects();
-  }, [isInitialized, hasLoaded, isLoading, listVaultWatchProjects]);
+  }, [isReadOnlyReady, isInitialized, hasLoaded, isLoading, listVaultWatchProjects]);
+
+  // Re-load when wallet connects (to get fresh data from authenticated MSP)
+  useEffect(() => {
+    if (isInitialized && hasLoaded) {
+      setHasLoaded(false);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isInitialized]);
 
   const filteredProjects = useMemo(() => {
     return projects.filter((project) => {
@@ -69,35 +78,6 @@ export default function ProjectsPage() {
       return matchesSearch && matchesCategory;
     });
   }, [projects, searchQuery, selectedCategory]);
-
-  // Show wallet connection prompt if not connected
-  if (!isConnected) {
-    return (
-      <div className="py-12">
-        <Container>
-          <div className="mb-8">
-            <h1 className="text-3xl font-bold tracking-tight sm:text-4xl">
-              Projects
-            </h1>
-            <p className="mt-2 text-muted-foreground">
-              Explore crypto projects with verified transparency records.
-            </p>
-          </div>
-
-          <Card className="border-border/40">
-            <CardContent className="flex flex-col items-center justify-center py-16">
-              <Wallet className="h-12 w-12 text-muted-foreground mb-4" />
-              <p className="text-lg font-medium mb-2">Connect Your Wallet</p>
-              <p className="text-muted-foreground text-center max-w-md">
-                Connect your wallet to view projects stored on DataHaven. 
-                Your data is retrieved directly from decentralized storage.
-              </p>
-            </CardContent>
-          </Card>
-        </Container>
-      </div>
-    );
-  }
 
   // Show loading state
   if (isDataHavenLoading || (isLoading && !hasLoaded)) {
@@ -142,6 +122,13 @@ export default function ProjectsPage() {
             )}
           </p>
         </div>
+
+        {!isConnected && (
+          <div className="mb-6 flex items-center gap-2 rounded-lg border border-border/40 bg-muted/30 px-4 py-3 text-sm text-muted-foreground">
+            <Info className="h-4 w-4 shrink-0" />
+            <span>Connect your wallet to discover and register new projects.</span>
+          </div>
+        )}
 
         <div className="mb-8">
           <ProjectSearch

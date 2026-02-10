@@ -26,7 +26,8 @@ import type {
   FileTree,
   DownloadOptions,
 } from '@/lib/datahaven/client';
-import type { Project, Commitment, CommitmentStatus } from '@/types';
+import type { Project, Commitment, CommitmentStatus, ProjectIndexEntry } from '@/types';
+import { useProjectStore } from '@/stores/projectStore';
 
 interface StatusUpdateResult {
   success: boolean;
@@ -49,6 +50,7 @@ interface DownloadResult<T> {
 interface UseDataHavenReturn {
   // State
   isInitialized: boolean;
+  isReadOnlyReady: boolean;
   isAuthenticated: boolean;
   isLoading: boolean;
   error: Error | null;
@@ -143,6 +145,7 @@ export const useDataHaven = (): UseDataHavenReturn => {
   const { wasmInitialized, wasmError } = useDataHavenContext();
 
   const [isInitialized, setIsInitialized] = useState(false);
+  const [isReadOnlyReady, setIsReadOnlyReady] = useState(false);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<Error | null>(wasmError);
@@ -179,6 +182,7 @@ export const useDataHaven = (): UseDataHavenReturn => {
       setMspHealth(health);
 
       setIsInitialized(true);
+      setIsReadOnlyReady(true);
       console.log('✅ DataHaven clients initialized');
     } catch (err) {
       console.error('Failed to initialize DataHaven:', err);
@@ -187,6 +191,23 @@ export const useDataHaven = (): UseDataHavenReturn => {
       setIsLoading(false);
     }
   }, [wasmInitialized, address, walletClient, publicClient]);
+
+  /**
+   * Initialize read-only clients (no wallet required)
+   * Enables browsing projects without connecting a wallet.
+   */
+  const initReadOnly = useCallback(async () => {
+    if (!wasmInitialized || isReadOnlyReady || isLoading) return;
+
+    try {
+      const { initializeReadOnly } = await import('@/lib/datahaven/client');
+      await initializeReadOnly(datahavenTestnet);
+      setIsReadOnlyReady(true);
+      console.log('✅ DataHaven read-only clients initialized');
+    } catch (err) {
+      console.error('Failed to initialize read-only mode:', err);
+    }
+  }, [wasmInitialized, isReadOnlyReady, isLoading]);
 
   /**
    * Authenticate with SIWE
@@ -271,7 +292,7 @@ export const useDataHaven = (): UseDataHavenReturn => {
    */
   const getBucket = useCallback(
     async (bucketId: string): Promise<BucketInfo | null> => {
-      if (!isInitialized) {
+      if (!isReadOnlyReady && !isInitialized) {
         return null;
       }
 
@@ -283,7 +304,7 @@ export const useDataHaven = (): UseDataHavenReturn => {
         return null;
       }
     },
-    [isInitialized]
+    [isReadOnlyReady, isInitialized]
   );
 
   /**
@@ -358,7 +379,7 @@ export const useDataHaven = (): UseDataHavenReturn => {
       fileKey: string,
       options: DownloadOptions = {}
     ): Promise<DownloadResult<T>> => {
-      if (!isInitialized) {
+      if (!isReadOnlyReady && !isInitialized) {
         setError(new Error('Not initialized'));
         return {
           data: null,
@@ -375,7 +396,7 @@ export const useDataHaven = (): UseDataHavenReturn => {
       try {
         const { downloadJsonFile } = await import('@/lib/datahaven/client');
         const result = await downloadJsonFile<T>(fileKey, options);
-        
+
         return {
           data: result.data,
           verification: {
@@ -397,7 +418,7 @@ export const useDataHaven = (): UseDataHavenReturn => {
         setIsLoading(false);
       }
     },
-    [isInitialized]
+    [isReadOnlyReady, isInitialized]
   );
 
   /**
@@ -406,7 +427,7 @@ export const useDataHaven = (): UseDataHavenReturn => {
    */
   const downloadFile = useCallback(
     async <T>(fileKey: string): Promise<T | null> => {
-      if (!isInitialized) {
+      if (!isReadOnlyReady && !isInitialized) {
         setError(new Error('Not initialized'));
         return null;
       }
@@ -417,12 +438,12 @@ export const useDataHaven = (): UseDataHavenReturn => {
       try {
         const { downloadJsonFile } = await import('@/lib/datahaven/client');
         const result = await downloadJsonFile<T>(fileKey, { verify: true });
-        
+
         // Log verification status but don't block
         if (result.verification.status === 'failed') {
           console.warn(`⚠️ Data integrity verification failed: ${result.verification.reason}`);
         }
-        
+
         return result.data;
       } catch (err) {
         console.error('Failed to download file:', err);
@@ -432,7 +453,7 @@ export const useDataHaven = (): UseDataHavenReturn => {
         setIsLoading(false);
       }
     },
-    [isInitialized]
+    [isReadOnlyReady, isInitialized]
   );
 
   /**
@@ -444,7 +465,7 @@ export const useDataHaven = (): UseDataHavenReturn => {
       data: Uint8Array | Blob,
       expectedFingerprint?: string
     ): Promise<VerificationResult> => {
-      if (!isInitialized) {
+      if (!isReadOnlyReady && !isInitialized) {
         return {
           verified: false,
           reason: 'DataHaven not initialized',
@@ -463,7 +484,7 @@ export const useDataHaven = (): UseDataHavenReturn => {
         };
       }
     },
-    [isInitialized]
+    [isReadOnlyReady, isInitialized]
   );
 
   /**
@@ -472,7 +493,7 @@ export const useDataHaven = (): UseDataHavenReturn => {
    */
   const verifyFileStorage = useCallback(
     async (fileKey: string, bucketId?: string): Promise<FileStorageVerification | null> => {
-      if (!isInitialized) {
+      if (!isReadOnlyReady && !isInitialized) {
         setError(new Error('Not initialized'));
         return null;
       }
@@ -486,7 +507,7 @@ export const useDataHaven = (): UseDataHavenReturn => {
         return null;
       }
     },
-    [isInitialized]
+    [isReadOnlyReady, isInitialized]
   );
 
   /**
@@ -591,56 +612,107 @@ export const useDataHaven = (): UseDataHavenReturn => {
    * Returns buckets with their parsed project metadata
    */
   const listVaultWatchProjects = useCallback(async (): Promise<Array<{ bucket: Bucket; project: Project | null }>> => {
-    if (!isInitialized) {
-      setError(new Error('Not initialized'));
-      return [];
-    }
+    // Full initialization: use authenticated flow (MSP bucket listing)
+    if (isInitialized) {
+      setIsLoading(true);
+      setError(null);
 
-    setIsLoading(true);
-    setError(null);
+      try {
+        const {
+          listVaultWatchBuckets,
+          loadProjectFromBucket,
+          isAuthenticated: checkAuth
+        } = await import('@/lib/datahaven/client');
 
-    try {
-      const { 
-        listVaultWatchBuckets, 
-        loadProjectFromBucket,
-        isAuthenticated: checkAuth 
-      } = await import('@/lib/datahaven/client');
-
-      // Ensure authenticated
-      if (!checkAuth()) {
-        const authSuccess = await authenticate();
-        if (!authSuccess) {
-          setIsLoading(false);
-          return [];
+        // Ensure authenticated
+        if (!checkAuth()) {
+          const authSuccess = await authenticate();
+          if (!authSuccess) {
+            setIsLoading(false);
+            return [];
+          }
         }
+
+        // Get all VaultWatch buckets
+        const buckets = await listVaultWatchBuckets();
+
+        // Load project metadata for each bucket
+        const results: Array<{ bucket: Bucket; project: Project | null }> = [];
+        for (const bucket of buckets) {
+          const project = await loadProjectFromBucket<Project>(bucket.bucketId);
+          results.push({ bucket, project });
+        }
+
+        // Cache to project store for read-only fallback
+        const indexEntries: ProjectIndexEntry[] = results
+          .filter(({ project }) => project !== null)
+          .map(({ bucket, project }) => ({
+            id: project!.id,
+            name: project!.name,
+            category: project!.category,
+            status: project!.status,
+            ownerAddress: project!.ownerAddress,
+            bucketId: bucket.bucketId,
+            commitmentCount: bucket.fileCount > 1 ? bucket.fileCount - 1 : 0,
+            lastUpdated: project!.updatedAt,
+          }));
+        useProjectStore.getState().setProjects(indexEntries);
+        useProjectStore.getState().setSyncedAt(Date.now());
+
+        console.log(`✅ Loaded ${results.length} VaultWatch projects from MSP`);
+        return results;
+      } catch (err) {
+        console.error('Failed to list VaultWatch projects:', err);
+        setError(err instanceof Error ? err : new Error('Failed to list projects'));
+        return [];
+      } finally {
+        setIsLoading(false);
       }
-
-      // Get all VaultWatch buckets
-      const buckets = await listVaultWatchBuckets();
-
-      // Load project metadata for each bucket
-      const results: Array<{ bucket: Bucket; project: Project | null }> = [];
-      for (const bucket of buckets) {
-        const project = await loadProjectFromBucket<Project>(bucket.bucketId);
-        results.push({ bucket, project });
-      }
-
-      console.log(`✅ Loaded ${results.length} VaultWatch projects from MSP`);
-      return results;
-    } catch (err) {
-      console.error('Failed to list VaultWatch projects:', err);
-      setError(err instanceof Error ? err : new Error('Failed to list projects'));
-      return [];
-    } finally {
-      setIsLoading(false);
     }
-  }, [isInitialized, authenticate]);
+
+    // Read-only mode: load from cached bucketIds in project store
+    if (isReadOnlyReady) {
+      const cachedProjects = useProjectStore.getState().projects;
+      if (cachedProjects.length === 0) return [];
+
+      setIsLoading(true);
+      setError(null);
+
+      try {
+        const { loadProjectFromBucket } = await import('@/lib/datahaven/client');
+
+        const results: Array<{ bucket: Bucket; project: Project | null }> = [];
+        for (const cached of cachedProjects) {
+          const project = await loadProjectFromBucket<Project>(cached.bucketId);
+          results.push({
+            bucket: {
+              bucketId: cached.bucketId,
+              name: `vaultwatch-${cached.id}`,
+              root: '',
+              fileCount: cached.commitmentCount + 1,
+            } as Bucket,
+            project,
+          });
+        }
+
+        console.log(`✅ Loaded ${results.length} VaultWatch projects from cache (read-only)`);
+        return results;
+      } catch (err) {
+        console.error('Failed to load projects in read-only mode:', err);
+        return [];
+      } finally {
+        setIsLoading(false);
+      }
+    }
+
+    return [];
+  }, [isInitialized, isReadOnlyReady, authenticate]);
 
   /**
    * Load a single project from a bucket
    */
   const loadProject = useCallback(async (bucketId: string): Promise<Project | null> => {
-    if (!isInitialized) {
+    if (!isReadOnlyReady && !isInitialized) {
       setError(new Error('Not initialized'));
       return null;
     }
@@ -649,17 +721,7 @@ export const useDataHaven = (): UseDataHavenReturn => {
     setError(null);
 
     try {
-      const { loadProjectFromBucket, isAuthenticated: checkAuth } = await import('@/lib/datahaven/client');
-
-      // Ensure authenticated
-      if (!checkAuth()) {
-        const authSuccess = await authenticate();
-        if (!authSuccess) {
-          setIsLoading(false);
-          return null;
-        }
-      }
-
+      const { loadProjectFromBucket } = await import('@/lib/datahaven/client');
       const project = await loadProjectFromBucket<Project>(bucketId);
       return project;
     } catch (err) {
@@ -669,13 +731,13 @@ export const useDataHaven = (): UseDataHavenReturn => {
     } finally {
       setIsLoading(false);
     }
-  }, [isInitialized, authenticate]);
+  }, [isReadOnlyReady, isInitialized]);
 
   /**
    * Load all commitments from a bucket
    */
   const loadCommitments = useCallback(async (bucketId: string): Promise<Commitment[]> => {
-    if (!isInitialized) {
+    if (!isReadOnlyReady && !isInitialized) {
       setError(new Error('Not initialized'));
       return [];
     }
@@ -684,17 +746,7 @@ export const useDataHaven = (): UseDataHavenReturn => {
     setError(null);
 
     try {
-      const { loadCommitmentsFromBucket, isAuthenticated: checkAuth } = await import('@/lib/datahaven/client');
-
-      // Ensure authenticated
-      if (!checkAuth()) {
-        const authSuccess = await authenticate();
-        if (!authSuccess) {
-          setIsLoading(false);
-          return [];
-        }
-      }
-
+      const { loadCommitmentsFromBucket } = await import('@/lib/datahaven/client');
       const commitments = await loadCommitmentsFromBucket<Commitment>(bucketId);
       return commitments;
     } catch (err) {
@@ -704,41 +756,32 @@ export const useDataHaven = (): UseDataHavenReturn => {
     } finally {
       setIsLoading(false);
     }
-  }, [isInitialized, authenticate]);
+  }, [isReadOnlyReady, isInitialized]);
 
   /**
    * Get files in a bucket
    */
   const getBucketFiles = useCallback(async (bucketId: string, path?: string): Promise<FileTree[]> => {
-    if (!isInitialized) {
+    if (!isReadOnlyReady && !isInitialized) {
       return [];
     }
 
     try {
-      const { getBucketFiles: getBucketFilesFn, isAuthenticated: checkAuth } = await import('@/lib/datahaven/client');
-
-      // Ensure authenticated
-      if (!checkAuth()) {
-        const authSuccess = await authenticate();
-        if (!authSuccess) {
-          return [];
-        }
-      }
-
+      const { getBucketFiles: getBucketFilesFn } = await import('@/lib/datahaven/client');
       const response = await getBucketFilesFn(bucketId, path);
       return response.files;
     } catch (err) {
       console.error('Failed to get bucket files:', err);
       return [];
     }
-  }, [isInitialized, authenticate]);
+  }, [isReadOnlyReady, isInitialized]);
 
   /**
    * Load project with verification
    */
   const loadProjectWithVerification = useCallback(
     async (bucketId: string): Promise<{ data: Project | null; verification: VerificationResult }> => {
-      if (!isInitialized) {
+      if (!isReadOnlyReady && !isInitialized) {
         return {
           data: null,
           verification: { verified: false, reason: 'Not initialized' },
@@ -746,22 +789,7 @@ export const useDataHaven = (): UseDataHavenReturn => {
       }
 
       try {
-        const {
-          loadProjectFromBucketWithVerification,
-          isAuthenticated: checkAuth,
-        } = await import('@/lib/datahaven/client');
-
-        // Ensure authenticated
-        if (!checkAuth()) {
-          const authSuccess = await authenticate();
-          if (!authSuccess) {
-            return {
-              data: null,
-              verification: { verified: false, reason: 'Authentication failed' },
-            };
-          }
-        }
-
+        const { loadProjectFromBucketWithVerification } = await import('@/lib/datahaven/client');
         return await loadProjectFromBucketWithVerification<Project>(bucketId);
       } catch (err) {
         console.error('Failed to load project with verification:', err);
@@ -775,7 +803,7 @@ export const useDataHaven = (): UseDataHavenReturn => {
         };
       }
     },
-    [isInitialized, authenticate]
+    [isReadOnlyReady, isInitialized]
   );
 
   /**
@@ -785,24 +813,12 @@ export const useDataHaven = (): UseDataHavenReturn => {
     async (
       bucketId: string
     ): Promise<Array<{ data: Commitment; verification: VerificationResult; fileKey: string }>> => {
-      if (!isInitialized) {
+      if (!isReadOnlyReady && !isInitialized) {
         return [];
       }
 
       try {
-        const {
-          loadCommitmentsFromBucketWithVerification,
-          isAuthenticated: checkAuth,
-        } = await import('@/lib/datahaven/client');
-
-        // Ensure authenticated
-        if (!checkAuth()) {
-          const authSuccess = await authenticate();
-          if (!authSuccess) {
-            return [];
-          }
-        }
-
+        const { loadCommitmentsFromBucketWithVerification } = await import('@/lib/datahaven/client');
         return await loadCommitmentsFromBucketWithVerification<Commitment>(bucketId);
       } catch (err) {
         console.error('Failed to load commitments with verification:', err);
@@ -810,7 +826,7 @@ export const useDataHaven = (): UseDataHavenReturn => {
         return [];
       }
     },
-    [isInitialized, authenticate]
+    [isReadOnlyReady, isInitialized]
   );
 
   /**
@@ -955,14 +971,21 @@ export const useDataHaven = (): UseDataHavenReturn => {
     [address, isInitialized, authenticate]
   );
 
-  // Auto-initialize when wallet connects
+  // Auto-initialize read-only when WASM is ready (no wallet needed)
+  useEffect(() => {
+    if (wasmInitialized && !isReadOnlyReady && !isLoading) {
+      initReadOnly();
+    }
+  }, [wasmInitialized, isReadOnlyReady, isLoading, initReadOnly]);
+
+  // Auto-initialize full mode when wallet connects
   useEffect(() => {
     if (isConnected && wasmInitialized && !isInitialized && !isLoading) {
       initialize();
     }
   }, [isConnected, wasmInitialized, isInitialized, isLoading, initialize]);
 
-  // Cleanup on disconnect
+  // Cleanup on disconnect (keep read-only mode active)
   useEffect(() => {
     if (!isConnected) {
       setIsInitialized(false);
@@ -973,6 +996,7 @@ export const useDataHaven = (): UseDataHavenReturn => {
 
   return {
     isInitialized,
+    isReadOnlyReady,
     isAuthenticated,
     isLoading,
     error,

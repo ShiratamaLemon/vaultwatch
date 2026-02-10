@@ -87,6 +87,7 @@ let polkadotApiInstance: ApiPromise | null = null;
 let storageHubClientInstance: StorageHubClient | null = null;
 let publicClientInstance: PublicClient | null = null;
 let currentAddress: string | undefined = undefined;
+let readOnlyInitialized = false;
 
 // =============================================================================
 // WASM Initialization (REQUIRED before any SDK operations)
@@ -192,13 +193,13 @@ export const initStorageHubClient = (
 /**
  * Initialize MSP client for off-chain storage operations
  */
-export const initMspClient = async (address: string): Promise<MspClient> => {
-  if (mspClientInstance && currentAddress === address) {
+export const initMspClient = async (address?: string): Promise<MspClient> => {
+  if (mspClientInstance && (!address || currentAddress === address)) {
     return mspClientInstance;
   }
 
   try {
-    currentAddress = address;
+    if (address) currentAddress = address;
     const httpCfg: HttpClientConfig = { baseUrl: defaultConfig.mspUrl };
     mspClientInstance = await MspClient.connect(httpCfg, sessionProvider);
     console.log('MSP client initialized');
@@ -397,6 +398,34 @@ export const getStorageCostEstimateString = async (
     return 'Unable to estimate cost';
   }
 };
+
+// =============================================================================
+// Read-Only Initialization (no wallet required)
+// =============================================================================
+
+/**
+ * Initialize clients for read-only operations (no wallet required).
+ * Sets up PolkadotApi + PublicClient + MspClient without authentication.
+ */
+export const initializeReadOnly = async (chain: Chain): Promise<void> => {
+  if (readOnlyInitialized) return;
+
+  try {
+    await initPolkadotApi();
+    initPublicClient(chain);
+    await initMspClient();
+    readOnlyInitialized = true;
+    console.log('DataHaven read-only clients initialized');
+  } catch (error) {
+    console.error('Failed to initialize read-only clients:', error);
+    throw new DataHavenError('Read-only initialization failed', 'READONLY_INIT_FAILED', error);
+  }
+};
+
+/**
+ * Check if read-only clients are initialized
+ */
+export const isReadOnlyInitialized = (): boolean => readOnlyInitialized;
 
 // =============================================================================
 // SIWE Authentication
@@ -1933,6 +1962,7 @@ export const cleanup = async (): Promise<void> => {
   publicClientInstance = null;
   sessionToken = undefined;
   currentAddress = undefined;
+  readOnlyInitialized = false;
   console.log('DataHaven clients cleaned up');
 };
 

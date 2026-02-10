@@ -14,7 +14,6 @@ import {
   Shield,
   ExternalLink,
   Loader2,
-  Wallet,
   AlertCircle,
 } from 'lucide-react';
 import { Container } from '@/components/layout/Container';
@@ -36,8 +35,9 @@ export default function ProjectDetailPage() {
   const params = useParams();
   const bucketId = params.id as string; // URL param is now bucketId
   const { isConnected, address } = useAccount();
-  const { 
-    isInitialized, 
+  const {
+    isInitialized,
+    isReadOnlyReady,
     isLoading: isDataHavenLoading,
     loadProject,
     loadCommitments,
@@ -59,7 +59,7 @@ export default function ProjectDetailPage() {
   // Load project and commitments from MSP with verification
   useEffect(() => {
     const loadData = async () => {
-      if (!isInitialized || !bucketId) return;
+      if ((!isReadOnlyReady && !isInitialized) || !bucketId) return;
 
       setIsLoading(true);
       setError(null);
@@ -128,6 +128,7 @@ export default function ProjectDetailPage() {
 
     loadData();
   }, [
+    isReadOnlyReady,
     isInitialized,
     bucketId,
     loadProject,
@@ -190,33 +191,6 @@ export default function ProjectDetailPage() {
     },
     [bucketId, commitments, updateCommitmentStatus, address]
   );
-
-  // Show wallet connection prompt
-  if (!isConnected) {
-    return (
-      <div className="py-12">
-        <Container>
-          <Link
-            href="/projects"
-            className="mb-8 inline-flex items-center text-sm text-muted-foreground hover:text-foreground"
-          >
-            <ArrowLeft className="mr-2 h-4 w-4" />
-            Back to Projects
-          </Link>
-
-          <Card className="border-border/40">
-            <CardContent className="flex flex-col items-center justify-center py-16">
-              <Wallet className="h-12 w-12 text-muted-foreground mb-4" />
-              <p className="text-lg font-medium mb-2">Connect Your Wallet</p>
-              <p className="text-muted-foreground text-center max-w-md">
-                Connect your wallet to view project details stored on DataHaven.
-              </p>
-            </CardContent>
-          </Card>
-        </Container>
-      </div>
-    );
-  }
 
   // Show loading state
   if (isDataHavenLoading || isLoading) {
