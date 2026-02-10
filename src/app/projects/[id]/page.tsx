@@ -35,6 +35,16 @@ import { toast } from 'sonner';
 import type { Project, Commitment, CommitmentStatus } from '@/types';
 import type { VerificationStatus, VerificationResult } from '@/lib/datahaven/types';
 
+/** Map VerificationResult to a UI-friendly VerificationStatus */
+const mapVerificationStatus = (v: VerificationResult): VerificationStatus => {
+  if (!v.verified) {
+    return v.reason?.includes('INTEGRITY FAILURE') ? 'failed' : 'unavailable';
+  }
+  // verified: true but no on-chain fingerprint means existence confirmed only
+  if (!v.onChainFingerprint) return 'unavailable';
+  return 'verified';
+};
+
 export default function ProjectDetailPage() {
   const params = useParams();
   const bucketId = params.id as string; // URL param is now bucketId
@@ -108,7 +118,7 @@ export default function ProjectDetailPage() {
           setProject({ ...projectVerificationResult.data, bucketId });
         }
         setProjectVerification(
-          projectVerificationResult.verification.verified ? 'verified' : 'failed'
+          mapVerificationStatus(projectVerificationResult.verification)
         );
         setProjectVerificationDetail({
           onChainFingerprint: projectVerificationResult.verification.onChainFingerprint,
@@ -127,10 +137,7 @@ export default function ProjectDetailPage() {
         const verifications = new Map<string, VerificationStatus>();
         const verificationDetailMap = new Map<string, { onChainFingerprint?: string; calculatedFingerprint?: string; reason?: string }>();
         commitmentsVerificationResult.forEach(({ data, verification }) => {
-          verifications.set(
-            data.id,
-            verification.verified ? 'verified' : verification.reason?.includes('INTEGRITY FAILURE') ? 'failed' : 'unavailable'
-          );
+          verifications.set(data.id, mapVerificationStatus(verification));
           verificationDetailMap.set(data.id, {
             onChainFingerprint: verification.onChainFingerprint,
             calculatedFingerprint: verification.calculatedFingerprint,

@@ -220,7 +220,7 @@ export const VerificationDetailModal = ({
                 </div>
               )}
 
-              {!onChainFingerprint && verificationStatus !== 'pending' && (
+              {!onChainFingerprint && !verificationReason && verificationStatus !== 'pending' && (
                 <p className="text-xs text-muted-foreground">
                   No fingerprint data available for comparison.
                 </p>
