@@ -11,6 +11,10 @@ frontend:
     build:
       commands:
         - pnpm build
+        - echo "=== Build output breakdown ==="
+        - du -sh .next/
+        - du -sh .next/*/ 2>/dev/null || true
+        - du -sh .next/server/*/ 2>/dev/null || true
         - rm -rf .next/cache
   artifacts:
     baseDirectory: .next
