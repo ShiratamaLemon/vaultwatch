@@ -245,7 +245,8 @@ export const CommitmentTimeline = ({
                                   const { downloadBinaryFile } = await import('@/lib/datahaven/client');
                                   const blob = await downloadBinaryFile(ef.fileKey);
                                   if (blob) {
-                                    const url = URL.createObjectURL(blob);
+                                    const typedBlob = new Blob([blob], { type: ef.fileType });
+                                    const url = URL.createObjectURL(typedBlob);
                                     window.open(url, '_blank');
                                   }
                                 }}
@@ -259,7 +260,8 @@ export const CommitmentTimeline = ({
                                 const { downloadBinaryFile } = await import('@/lib/datahaven/client');
                                 const blob = await downloadBinaryFile(ef.fileKey);
                                 if (blob) {
-                                  const url = URL.createObjectURL(blob);
+                                  const typedBlob = new Blob([blob], { type: ef.fileType });
+                                  const url = URL.createObjectURL(typedBlob);
                                   const a = document.createElement('a');
                                   a.href = url;
                                   a.download = ef.fileName;
