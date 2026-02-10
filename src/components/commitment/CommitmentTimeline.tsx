@@ -33,6 +33,12 @@ interface CommitmentTimelineProps {
   isOwner?: boolean;
   onStatusUpdate?: (commitmentId: string, newStatus: CommitmentStatus, reason: string) => Promise<void>;
   verificationStatuses?: Map<string, VerificationStatus>;
+  verificationDetails?: Map<string, {
+    onChainFingerprint?: string;
+    calculatedFingerprint?: string;
+    reason?: string;
+  }>;
+  onVerificationClick?: (commitmentId: string) => void;
 }
 
 const statusIcons: Record<CommitmentStatus, React.ElementType> = {
@@ -56,6 +62,8 @@ export const CommitmentTimeline = ({
   isOwner = false,
   onStatusUpdate,
   verificationStatuses,
+  verificationDetails,
+  onVerificationClick,
 }: CommitmentTimelineProps) => {
   const [selectedCommitment, setSelectedCommitment] = useState<Commitment | null>(null);
   const [showStatusModal, setShowStatusModal] = useState(false);
@@ -194,6 +202,7 @@ export const CommitmentTimeline = ({
                         status={verificationStatuses?.get(commitment.id) || 'unverified'}
                         size="sm"
                         showLabel={false}
+                        onClick={onVerificationClick ? () => onVerificationClick(commitment.id) : undefined}
                       />
                       <span className="text-muted-foreground">Data Integrity</span>
                     </div>

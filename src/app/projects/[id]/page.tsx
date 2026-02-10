@@ -24,6 +24,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Separator } from '@/components/ui/separator';
 import { CommitmentTimeline } from '@/components/commitment/CommitmentTimeline';
 import { VerificationBadge } from '@/components/ui/verification-badge';
+import { VerificationDetailModal } from '@/components/ui/verification-detail-modal';
 import { TransparencyScoreBadge } from '@/components/project/TransparencyScoreBadge';
 import { useDataHaven } from '@/hooks/useDataHaven';
 import { useProjectStore } from '@/stores/projectStore';
@@ -47,6 +48,7 @@ export default function ProjectDetailPage() {
     loadProjectWithVerification,
     loadCommitmentsWithVerification,
     updateCommitmentStatus,
+    verifyFileStorage,
   } = useDataHaven();
 
   const [project, setProject] = useState<Project | null>(null);
@@ -58,6 +60,20 @@ export default function ProjectDetailPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isUpdatingStatus, setIsUpdatingStatus] = useState(false);
+
+  // Verification detail states
+  const [projectVerificationDetail, setProjectVerificationDetail] = useState<{
+    onChainFingerprint?: string;
+    calculatedFingerprint?: string;
+    reason?: string;
+  } | null>(null);
+  const [commitmentVerificationDetails, setCommitmentVerificationDetails] = useState<
+    Map<string, { onChainFingerprint?: string; calculatedFingerprint?: string; reason?: string }>
+  >(new Map());
+  const [verificationModalTarget, setVerificationModalTarget] = useState<{
+    type: 'project' | 'commitment';
+    id: string;
+  } | null>(null);
 
   // Load project and commitments from MSP with verification
   useEffect(() => {
@@ -94,6 +110,11 @@ export default function ProjectDetailPage() {
         setProjectVerification(
           projectVerificationResult.verification.verified ? 'verified' : 'failed'
         );
+        setProjectVerificationDetail({
+          onChainFingerprint: projectVerificationResult.verification.onChainFingerprint,
+          calculatedFingerprint: projectVerificationResult.verification.calculatedFingerprint,
+          reason: projectVerificationResult.verification.reason,
+        });
 
         // Step 4: Verify commitments in background
         const commitmentsVerificationResult = await loadCommitmentsWithVerification(bucketId);
@@ -104,13 +125,20 @@ export default function ProjectDetailPage() {
 
         // Store verification results
         const verifications = new Map<string, VerificationStatus>();
+        const verificationDetailMap = new Map<string, { onChainFingerprint?: string; calculatedFingerprint?: string; reason?: string }>();
         commitmentsVerificationResult.forEach(({ data, verification }) => {
           verifications.set(
             data.id,
             verification.verified ? 'verified' : verification.reason?.includes('INTEGRITY FAILURE') ? 'failed' : 'unavailable'
           );
+          verificationDetailMap.set(data.id, {
+            onChainFingerprint: verification.onChainFingerprint,
+            calculatedFingerprint: verification.calculatedFingerprint,
+            reason: verification.reason,
+          });
         });
         setCommitmentVerifications(verifications);
+        setCommitmentVerificationDetails(verificationDetailMap);
 
         // Log verification warnings if any
         commitmentsVerificationResult.forEach(({ data, verification }) => {
@@ -289,6 +317,7 @@ export default function ProjectDetailPage() {
                       status={projectVerification}
                       size="sm"
                       showLabel={false}
+                      onClick={() => setVerificationModalTarget({ type: 'project', id: 'project' })}
                     />
                   </div>
                   <div className="mt-2 flex flex-wrap items-center gap-2">
@@ -378,6 +407,10 @@ export default function ProjectDetailPage() {
                   isOwner={isOwner}
                   onStatusUpdate={handleStatusUpdate}
                   verificationStatuses={commitmentVerifications}
+                  verificationDetails={commitmentVerificationDetails}
+                  onVerificationClick={(commitmentId) =>
+                    setVerificationModalTarget({ type: 'commitment', id: commitmentId })
+                  }
                 />
               ) : (
                 <Card className="border-border/40">
@@ -501,6 +534,38 @@ export default function ProjectDetailPage() {
             </Card>
           </div>
         </div>
+        {/* Verification Detail Modal */}
+        {verificationModalTarget && (() => {
+          const isProject = verificationModalTarget.type === 'project';
+          const commitment = !isProject
+            ? commitments.find((c) => c.id === verificationModalTarget.id)
+            : null;
+          const detail = isProject
+            ? projectVerificationDetail
+            : commitmentVerificationDetails.get(verificationModalTarget.id);
+          const status = isProject
+            ? projectVerification
+            : (commitmentVerifications.get(verificationModalTarget.id) || 'unverified');
+
+          return (
+            <VerificationDetailModal
+              open={!!verificationModalTarget}
+              onOpenChange={(open) => {
+                if (!open) setVerificationModalTarget(null);
+              }}
+              verificationStatus={status}
+              onChainFingerprint={detail?.onChainFingerprint}
+              calculatedFingerprint={detail?.calculatedFingerprint}
+              verificationReason={detail?.reason}
+              fileKey={isProject ? project.fileKey : commitment?.fileKey}
+              txHash={isProject ? undefined : commitment?.txHash}
+              blockNumber={isProject ? undefined : commitment?.blockNumber}
+              bucketId={bucketId}
+              label={isProject ? 'Project Metadata' : (commitment?.title || 'Commitment')}
+              verifyFileStorage={verifyFileStorage}
+            />
+          );
+        })()}
       </Container>
     </div>
   );

@@ -16,6 +16,7 @@ interface VerificationBadgeProps {
   className?: string;
   showLabel?: boolean;
   size?: 'sm' | 'md' | 'lg';
+  onClick?: () => void;
 }
 
 const statusConfig: Record<VerificationStatusType, {
@@ -86,6 +87,7 @@ export const VerificationBadge = ({
   className,
   showLabel = true,
   size = 'md',
+  onClick,
 }: VerificationBadgeProps) => {
   const config = statusConfig[status];
   const sizeClasses = sizeConfig[size];
@@ -93,10 +95,12 @@ export const VerificationBadge = ({
 
   const badge = (
     <div
+      onClick={onClick}
       className={cn(
         'inline-flex items-center gap-1 rounded-full',
         config.bgClass,
         sizeClasses.padding,
+        onClick && 'cursor-pointer hover:opacity-80 transition-opacity',
         className
       )}
     >
