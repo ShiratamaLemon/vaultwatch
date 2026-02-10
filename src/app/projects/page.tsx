@@ -37,18 +37,24 @@ export default function ProjectsPage() {
         const results = await listVaultWatchProjects();
 
         // Convert to ProjectIndexEntry format
+        // Preserve cached lastUpdated if newer (detail page updates it on commitment activity)
+        const cachedProjects = useProjectStore.getState().projects;
         const indexEntries: ProjectIndexEntry[] = results
           .filter(({ project }) => project !== null)
-          .map(({ bucket, project }) => ({
-            id: project!.id,
-            name: project!.name,
-            category: project!.category,
-            status: project!.status,
-            ownerAddress: project!.ownerAddress,
-            bucketId: bucket.bucketId,
-            commitmentCount: bucket.fileCount > 1 ? bucket.fileCount - 1 : 0, // Subtract metadata.json
-            lastUpdated: project!.updatedAt,
-          }));
+          .map(({ bucket, project }) => {
+            const cached = cachedProjects.find((p) => p.id === project!.id);
+            return {
+              id: project!.id,
+              name: project!.name,
+              category: project!.category,
+              status: project!.status,
+              ownerAddress: project!.ownerAddress,
+              bucketId: bucket.bucketId,
+              commitmentCount: bucket.fileCount > 1 ? bucket.fileCount - 1 : 0,
+              lastUpdated: Math.max(project!.updatedAt, cached?.lastUpdated || 0),
+              transparencyScore: cached?.transparencyScore,
+            };
+          });
 
         setProjects(indexEntries);
         setHasLoaded(true);

@@ -112,6 +112,17 @@ export default function ProjectDetailPage() {
 
         console.log(`✅ Loaded project "${projectData.name}" with ${commitmentsData.length} commitments`);
 
+        // Update store lastUpdated from most recent commitment activity
+        if (commitmentsData.length > 0) {
+          const latestActivity = Math.max(
+            projectData.updatedAt,
+            ...commitmentsData.map((c) => c.updatedAt)
+          );
+          useProjectStore.getState().updateProject(projectData.id, {
+            lastUpdated: latestActivity,
+          });
+        }
+
         // Step 3: Verify project metadata in background
         const projectVerificationResult = await loadProjectWithVerification(bucketId);
         if (projectVerificationResult.data) {
@@ -217,6 +228,13 @@ export default function ProjectDetailPage() {
             )
           );
           toast.success('Status updated successfully!');
+
+          // Update store lastUpdated
+          if (project) {
+            useProjectStore.getState().updateProject(project.id, {
+              lastUpdated: Date.now(),
+            });
+          }
         } else {
           toast.error('Failed to update status');
         }
@@ -227,7 +245,7 @@ export default function ProjectDetailPage() {
         setIsUpdatingStatus(false);
       }
     },
-    [bucketId, commitments, updateCommitmentStatus, address]
+    [bucketId, commitments, updateCommitmentStatus, address, project]
   );
 
   // Calculate transparency score from commitments

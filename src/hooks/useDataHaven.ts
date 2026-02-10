@@ -658,18 +658,24 @@ export const useDataHaven = (): UseDataHavenReturn => {
         }
 
         // Cache to project store for read-only fallback
+        // Preserve cached lastUpdated if it's newer than metadata.json's updatedAt
+        const currentProjects = useProjectStore.getState().projects;
         const indexEntries: ProjectIndexEntry[] = results
           .filter(({ project }) => project !== null)
-          .map(({ bucket, project }) => ({
-            id: project!.id,
-            name: project!.name,
-            category: project!.category,
-            status: project!.status,
-            ownerAddress: project!.ownerAddress,
-            bucketId: bucket.bucketId,
-            commitmentCount: bucket.fileCount > 1 ? bucket.fileCount - 1 : 0,
-            lastUpdated: project!.updatedAt,
-          }));
+          .map(({ bucket, project }) => {
+            const cached = currentProjects.find((p) => p.id === project!.id);
+            return {
+              id: project!.id,
+              name: project!.name,
+              category: project!.category,
+              status: project!.status,
+              ownerAddress: project!.ownerAddress,
+              bucketId: bucket.bucketId,
+              commitmentCount: bucket.fileCount > 1 ? bucket.fileCount - 1 : 0,
+              lastUpdated: Math.max(project!.updatedAt, cached?.lastUpdated || 0),
+              transparencyScore: cached?.transparencyScore,
+            };
+          });
         useProjectStore.getState().setProjects(indexEntries);
         useProjectStore.getState().setSyncedAt(Date.now());
 
@@ -727,18 +733,24 @@ export const useDataHaven = (): UseDataHavenReturn => {
         }
 
         // Update cache with loaded data
+        // Preserve cached lastUpdated if it's newer than metadata.json's updatedAt
+        const currentProjectsRO = useProjectStore.getState().projects;
         const indexEntries: ProjectIndexEntry[] = results
           .filter(({ project }) => project !== null)
-          .map(({ bucket, project }) => ({
-            id: project!.id,
-            name: project!.name,
-            category: project!.category,
-            status: project!.status,
-            ownerAddress: project!.ownerAddress,
-            bucketId: bucket.bucketId,
-            commitmentCount: 0,
-            lastUpdated: project!.updatedAt,
-          }));
+          .map(({ bucket, project }) => {
+            const cached = currentProjectsRO.find((p) => p.id === project!.id);
+            return {
+              id: project!.id,
+              name: project!.name,
+              category: project!.category,
+              status: project!.status,
+              ownerAddress: project!.ownerAddress,
+              bucketId: bucket.bucketId,
+              commitmentCount: 0,
+              lastUpdated: Math.max(project!.updatedAt, cached?.lastUpdated || 0),
+              transparencyScore: cached?.transparencyScore,
+            };
+          });
         useProjectStore.getState().setProjects(indexEntries);
         useProjectStore.getState().setSyncedAt(Date.now());
 
