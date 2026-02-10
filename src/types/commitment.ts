@@ -49,6 +49,14 @@ export interface Commitment {
   /** Evidence snapshot (optional, stored in DataHaven) */
   evidenceSnapshot?: string;
 
+  /** Evidence files stored in DataHaven */
+  evidenceFiles?: Array<{
+    fileKey: string;
+    fileName: string;
+    fileSize: number;
+    fileType: string;
+  }>;
+
   /** Current status */
   status: CommitmentStatus;
 

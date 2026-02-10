@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { Search, Filter } from 'lucide-react';
+import { Search, Filter, Star } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import {
@@ -17,12 +17,16 @@ interface ProjectSearchProps {
   onSearch: (query: string) => void;
   onCategoryChange: (category: ProjectCategory | 'all') => void;
   selectedCategory: ProjectCategory | 'all';
+  showWatchlistOnly?: boolean;
+  onWatchlistToggle?: (show: boolean) => void;
 }
 
 export const ProjectSearch = ({
   onSearch,
   onCategoryChange,
   selectedCategory,
+  showWatchlistOnly = false,
+  onWatchlistToggle,
 }: ProjectSearchProps) => {
   const [searchQuery, setSearchQuery] = useState('');
 
@@ -50,6 +54,17 @@ export const ProjectSearch = ({
       </form>
 
       <div className="flex items-center gap-2">
+        {onWatchlistToggle && (
+          <Button
+            variant={showWatchlistOnly ? 'default' : 'outline'}
+            size="sm"
+            onClick={() => onWatchlistToggle(!showWatchlistOnly)}
+            className={showWatchlistOnly ? 'bg-yellow-500 hover:bg-yellow-600 text-black' : ''}
+          >
+            <Star className={`mr-1 h-3.5 w-3.5 ${showWatchlistOnly ? 'fill-current' : ''}`} />
+            Watchlist
+          </Button>
+        )}
         <Filter className="h-4 w-4 text-muted-foreground" />
         <Select
           value={selectedCategory}

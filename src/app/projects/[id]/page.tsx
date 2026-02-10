@@ -411,6 +411,7 @@ export default function ProjectDetailPage() {
               {commitments.length > 0 ? (
                 <CommitmentTimeline
                   commitments={commitments}
+                  bucketId={bucketId}
                   isOwner={isOwner}
                   onStatusUpdate={handleStatusUpdate}
                   verificationStatuses={commitmentVerifications}

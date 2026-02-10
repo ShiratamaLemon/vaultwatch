@@ -7,6 +7,7 @@ import { Container } from '@/components/layout/Container';
 import { ProjectList, ProjectSearch } from '@/components/project';
 import { useDataHaven } from '@/hooks/useDataHaven';
 import { Card, CardContent } from '@/components/ui/card';
+import { useProjectStore } from '@/stores/projectStore';
 import type { ProjectCategory, ProjectIndexEntry } from '@/types';
 
 export default function ProjectsPage() {
@@ -23,6 +24,8 @@ export default function ProjectsPage() {
   const [hasLoaded, setHasLoaded] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<ProjectCategory | 'all'>('all');
+  const [showWatchlistOnly, setShowWatchlistOnly] = useState(false);
+  const { watchedBucketIds } = useProjectStore();
 
   // Load projects when read-only or full initialization is ready
   useEffect(() => {
@@ -75,9 +78,12 @@ export default function ProjectsPage() {
         project.name.toLowerCase().includes(searchQuery.toLowerCase());
       const matchesCategory =
         selectedCategory === 'all' || project.category === selectedCategory;
-      return matchesSearch && matchesCategory;
+      const matchesWatchlist =
+        !showWatchlistOnly ||
+        (project.bucketId && watchedBucketIds.includes(project.bucketId));
+      return matchesSearch && matchesCategory && matchesWatchlist;
     });
-  }, [projects, searchQuery, selectedCategory]);
+  }, [projects, searchQuery, selectedCategory, showWatchlistOnly, watchedBucketIds]);
 
   // Show loading state
   if (isDataHavenLoading || (isLoading && !hasLoaded)) {
@@ -135,6 +141,8 @@ export default function ProjectsPage() {
             onSearch={setSearchQuery}
             onCategoryChange={setSelectedCategory}
             selectedCategory={selectedCategory}
+            showWatchlistOnly={showWatchlistOnly}
+            onWatchlistToggle={setShowWatchlistOnly}
           />
         </div>
 

@@ -1,12 +1,13 @@
 'use client';
 
 import Link from 'next/link';
-import { ExternalLink, FileText, CheckCircle } from 'lucide-react';
+import { ExternalLink, FileText, CheckCircle, Star } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { getGradeFromScore } from '@/lib/transparency-score';
 import type { ProjectIndexEntry, ProjectCategory } from '@/types';
 import { PROJECT_CATEGORY_LABELS } from '@/types';
+import { useProjectStore } from '@/stores/projectStore';
 
 interface ProjectCardProps {
   project: ProjectIndexEntry;
@@ -24,8 +25,9 @@ const categoryColors: Record<ProjectCategory, string> = {
 
 export const ProjectCard = ({ project }: ProjectCardProps) => {
   const categoryColor = categoryColors[project.category] || categoryColors.other;
-  // Use bucketId for URL if available, otherwise fall back to project.id
   const projectUrl = project.bucketId ? `/projects/${project.bucketId}` : `/projects/${project.id}`;
+  const { watchedBucketIds, toggleWatchlist } = useProjectStore();
+  const isWatched = project.bucketId ? watchedBucketIds.includes(project.bucketId) : false;
 
   return (
     <Link href={projectUrl}>
@@ -45,7 +47,27 @@ export const ProjectCard = ({ project }: ProjectCardProps) => {
                 </Badge>
               </div>
             </div>
-            <ExternalLink className="h-4 w-4 text-muted-foreground" />
+            <div className="flex items-center gap-1">
+              {project.bucketId && (
+                <button
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    toggleWatchlist(project.bucketId!);
+                  }}
+                  className="p-1 rounded-md hover:bg-muted/50 transition-colors"
+                >
+                  <Star
+                    className={`h-4 w-4 ${
+                      isWatched
+                        ? 'fill-yellow-400 text-yellow-400'
+                        : 'text-muted-foreground'
+                    }`}
+                  />
+                </button>
+              )}
+              <ExternalLink className="h-4 w-4 text-muted-foreground" />
+            </div>
           </div>
         </CardHeader>
         <CardContent>

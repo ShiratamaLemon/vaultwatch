@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAccount } from 'wagmi';
 import { v4 as uuidv4 } from 'uuid';
-import { Loader2, Calendar, AlertCircle } from 'lucide-react';
+import { Loader2, Calendar, AlertCircle, Upload, X, FileText } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -49,6 +49,7 @@ export const CommitmentForm = ({ projectId, bucketId }: CommitmentFormProps) => 
     isInitialized,
     isLoading: isDataHavenLoading,
     uploadFile,
+    uploadBinaryFile,
     initialize,
     verifyBucketOwnership,
   } = useDataHaven();
@@ -56,6 +57,8 @@ export const CommitmentForm = ({ projectId, bucketId }: CommitmentFormProps) => 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [transactionResult, setTransactionResult] = useState<TransactionResult | null>(null);
+  const [evidenceFiles, setEvidenceFiles] = useState<File[]>([]);
+  const [isUploadingEvidence, setIsUploadingEvidence] = useState(false);
   const [formData, setFormData] = useState<CommitmentFormData>({
     type: 'roadmap',
     title: '',
@@ -78,6 +81,26 @@ export const CommitmentForm = ({ projectId, bucketId }: CommitmentFormProps) => 
   const handleDateChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const date = e.target.value ? new Date(e.target.value).getTime() : undefined;
     setFormData((prev) => ({ ...prev, targetDate: date }));
+  };
+
+  const handleEvidenceFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    const maxSize = 10 * 1024 * 1024; // 10MB
+
+    for (const file of files) {
+      if (file.size > maxSize) {
+        toast.error(`File "${file.name}" exceeds 10MB limit`);
+        return;
+      }
+    }
+
+    setEvidenceFiles((prev) => [...prev, ...files]);
+    // Reset input so the same file can be re-selected
+    e.target.value = '';
+  };
+
+  const removeEvidenceFile = (index: number) => {
+    setEvidenceFiles((prev) => prev.filter((_, i) => i !== index));
   };
 
   const validateForm = (): string | null => {
@@ -138,6 +161,24 @@ export const CommitmentForm = ({ projectId, bucketId }: CommitmentFormProps) => 
       const commitmentId = uuidv4();
       const now = Date.now();
 
+      // Upload evidence files first (if any)
+      const uploadedEvidence: Array<{ fileKey: string; fileName: string; fileSize: number; fileType: string }> = [];
+      if (evidenceFiles.length > 0) {
+        setIsUploadingEvidence(true);
+        toast.info(`Uploading ${evidenceFiles.length} evidence file(s)...`);
+
+        for (const file of evidenceFiles) {
+          const filePath = `evidence/${commitmentId}/${file.name}`;
+          const result = await uploadBinaryFile(bucketId, filePath, file);
+          if (result) {
+            uploadedEvidence.push(result);
+          } else {
+            toast.error(`Failed to upload evidence file: ${file.name}`);
+          }
+        }
+        setIsUploadingEvidence(false);
+      }
+
       toast.info('Uploading commitment to DataHaven...');
 
       // First upload: Create commitment without txHash
@@ -149,6 +190,7 @@ export const CommitmentForm = ({ projectId, bucketId }: CommitmentFormProps) => 
         createdBy: address,
         createdAt: now,
         updatedAt: now,
+        ...(uploadedEvidence.length > 0 ? { evidenceFiles: uploadedEvidence } : {}),
       };
 
       const firstUploadResult = await uploadFile(
@@ -369,6 +411,60 @@ export const CommitmentForm = ({ projectId, bucketId }: CommitmentFormProps) => 
               Link to the official announcement, blog post, or documentation.
             </p>
           </div>
+
+          <div className="space-y-2">
+            <Label>Evidence Files (Optional)</Label>
+            <div className="flex items-center gap-2">
+              <input
+                type="file"
+                id="evidenceFileInput"
+                className="hidden"
+                accept="image/*,application/pdf"
+                multiple
+                onChange={handleEvidenceFileChange}
+                disabled={isSubmitting}
+              />
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => document.getElementById('evidenceFileInput')?.click()}
+                disabled={isSubmitting}
+              >
+                <Upload className="mr-2 h-3.5 w-3.5" />
+                Upload Files
+              </Button>
+              <span className="text-xs text-muted-foreground">
+                Images or PDFs, max 10MB each
+              </span>
+            </div>
+            {evidenceFiles.length > 0 && (
+              <div className="space-y-1 mt-2">
+                {evidenceFiles.map((file, index) => (
+                  <div
+                    key={`${file.name}-${index}`}
+                    className="flex items-center justify-between rounded-md border border-border/40 bg-muted/30 px-3 py-1.5 text-sm"
+                  >
+                    <div className="flex items-center gap-2 min-w-0">
+                      <FileText className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                      <span className="truncate">{file.name}</span>
+                      <span className="text-xs text-muted-foreground shrink-0">
+                        ({(file.size / 1024).toFixed(0)} KB)
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => removeEvidenceFile(index)}
+                      className="text-muted-foreground hover:text-red-400 shrink-0 ml-2"
+                      disabled={isSubmitting}
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </CardContent>
       </Card>
 
@@ -389,7 +485,7 @@ export const CommitmentForm = ({ projectId, bucketId }: CommitmentFormProps) => 
           {isSubmitting ? (
             <>
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              Adding...
+              {isUploadingEvidence ? 'Uploading evidence...' : 'Adding...'}
             </>
           ) : (
             'Add Commitment'

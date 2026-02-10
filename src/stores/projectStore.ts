@@ -9,6 +9,7 @@ interface ProjectStore {
   isLoading: boolean;
   error: string | null;
   lastSyncedAt: number | null;
+  watchedBucketIds: string[];
 
   // Actions
   setProjects: (projects: ProjectIndexEntry[]) => void;
@@ -19,15 +20,17 @@ interface ProjectStore {
   setLoading: (loading: boolean) => void;
   setError: (error: string | null) => void;
   setSyncedAt: (timestamp: number) => void;
+  toggleWatchlist: (bucketId: string) => void;
   reset: () => void;
 }
 
 const initialState = {
-  projects: [],
-  selectedProjectId: null,
+  projects: [] as ProjectIndexEntry[],
+  selectedProjectId: null as string | null,
   isLoading: false,
-  error: null,
-  lastSyncedAt: null,
+  error: null as string | null,
+  lastSyncedAt: null as number | null,
+  watchedBucketIds: [] as string[],
 };
 
 export const useProjectStore = create<ProjectStore>()(
@@ -70,6 +73,13 @@ export const useProjectStore = create<ProjectStore>()(
       setSyncedAt: (timestamp) =>
         set({ lastSyncedAt: timestamp }),
 
+      toggleWatchlist: (bucketId) =>
+        set((state) => ({
+          watchedBucketIds: state.watchedBucketIds.includes(bucketId)
+            ? state.watchedBucketIds.filter((id) => id !== bucketId)
+            : [...state.watchedBucketIds, bucketId],
+        })),
+
       reset: () =>
         set(initialState),
     }),
@@ -78,6 +88,7 @@ export const useProjectStore = create<ProjectStore>()(
       partialize: (state) => ({
         projects: state.projects,
         lastSyncedAt: state.lastSyncedAt,
+        watchedBucketIds: state.watchedBucketIds,
       }),
     }
   )

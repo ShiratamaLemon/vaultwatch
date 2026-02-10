@@ -12,6 +12,10 @@ import {
   Settings,
   Copy,
   Check,
+  History,
+  FileText,
+  Download,
+  Eye,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -22,6 +26,7 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip';
 import { StatusUpdateModal } from './StatusUpdateModal';
+import { CommitmentHistory } from './CommitmentHistory';
 import { VerificationBadge } from '@/components/ui/verification-badge';
 import type { Commitment, CommitmentStatus } from '@/types';
 import { COMMITMENT_TYPE_LABELS, COMMITMENT_STATUS_LABELS } from '@/types';
@@ -30,6 +35,7 @@ import type { VerificationStatus } from '@/lib/datahaven/types';
 
 interface CommitmentTimelineProps {
   commitments: Commitment[];
+  bucketId: string;
   isOwner?: boolean;
   onStatusUpdate?: (commitmentId: string, newStatus: CommitmentStatus, reason: string) => Promise<void>;
   verificationStatuses?: Map<string, VerificationStatus>;
@@ -59,6 +65,7 @@ const statusColors: Record<CommitmentStatus, string> = {
 
 export const CommitmentTimeline = ({
   commitments,
+  bucketId,
   isOwner = false,
   onStatusUpdate,
   verificationStatuses,
@@ -68,6 +75,8 @@ export const CommitmentTimeline = ({
   const [selectedCommitment, setSelectedCommitment] = useState<Commitment | null>(null);
   const [showStatusModal, setShowStatusModal] = useState(false);
   const [copiedFileKey, setCopiedFileKey] = useState<string | null>(null);
+  const [selectedHistoryCommitment, setSelectedHistoryCommitment] = useState<Commitment | null>(null);
+  const [showHistoryModal, setShowHistoryModal] = useState(false);
 
   if (commitments.length === 0) {
     return (
@@ -146,6 +155,26 @@ export const CommitmentTimeline = ({
                       {COMMITMENT_STATUS_LABELS[commitment.status]}
                     </Badge>
 
+                    {/* History Button */}
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-6 w-6 p-0 text-muted-foreground hover:text-foreground"
+                          onClick={() => {
+                            setSelectedHistoryCommitment(commitment);
+                            setShowHistoryModal(true);
+                          }}
+                        >
+                          <History className="h-3.5 w-3.5" />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>
+                        <p>View History</p>
+                      </TooltipContent>
+                    </Tooltip>
+
                     {/* Status Update Button (Owner Only) */}
                     {isOwner && onStatusUpdate && (
                       <Tooltip>
@@ -195,6 +224,59 @@ export const CommitmentTimeline = ({
                     </a>
                   )}
 
+                  {/* Evidence Files */}
+                  {commitment.evidenceFiles && commitment.evidenceFiles.length > 0 && (
+                    <div className="mt-3 space-y-1">
+                      <div className="text-xs font-medium text-muted-foreground">Evidence Files</div>
+                      <div className="flex flex-wrap gap-2">
+                        {commitment.evidenceFiles.map((ef) => (
+                          <div
+                            key={ef.fileKey}
+                            className="flex items-center gap-1.5 rounded-md border border-border/40 bg-muted/30 px-2 py-1 text-xs"
+                          >
+                            <FileText className="h-3 w-3 text-muted-foreground" />
+                            <span className="max-w-[120px] truncate">{ef.fileName}</span>
+                            <span className="text-muted-foreground">
+                              ({(ef.fileSize / 1024).toFixed(0)} KB)
+                            </span>
+                            {ef.fileType.startsWith('image/') && (
+                              <button
+                                onClick={async () => {
+                                  const { downloadBinaryFile } = await import('@/lib/datahaven/client');
+                                  const blob = await downloadBinaryFile(ef.fileKey);
+                                  if (blob) {
+                                    const url = URL.createObjectURL(blob);
+                                    window.open(url, '_blank');
+                                  }
+                                }}
+                                className="text-emerald-400 hover:text-emerald-300"
+                              >
+                                <Eye className="h-3 w-3" />
+                              </button>
+                            )}
+                            <button
+                              onClick={async () => {
+                                const { downloadBinaryFile } = await import('@/lib/datahaven/client');
+                                const blob = await downloadBinaryFile(ef.fileKey);
+                                if (blob) {
+                                  const url = URL.createObjectURL(blob);
+                                  const a = document.createElement('a');
+                                  a.href = url;
+                                  a.download = ef.fileName;
+                                  a.click();
+                                  URL.revokeObjectURL(url);
+                                }
+                              }}
+                              className="text-muted-foreground hover:text-foreground"
+                            >
+                              <Download className="h-3 w-3" />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
                   {/* Verification & On-chain Links */}
                   <div className="mt-3 flex flex-wrap items-center gap-3 text-xs">
                     <div className="flex items-center gap-2">
@@ -211,7 +293,7 @@ export const CommitmentTimeline = ({
                     {(commitment.txHash || commitment.fileKey) && (
                       <div className="flex items-center gap-1.5 text-muted-foreground">
                         <span className="text-muted-foreground/70">|</span>
-                        
+
                         {/* File Key copy */}
                         {commitment.fileKey && (
                           <Tooltip>
@@ -270,6 +352,16 @@ export const CommitmentTimeline = ({
             onOpenChange={setShowStatusModal}
             commitment={selectedCommitment}
             onUpdate={handleStatusUpdate}
+          />
+        )}
+
+        {/* History Modal */}
+        {selectedHistoryCommitment && (
+          <CommitmentHistory
+            open={showHistoryModal}
+            onOpenChange={setShowHistoryModal}
+            commitment={selectedHistoryCommitment}
+            bucketId={bucketId}
           />
         )}
       </div>

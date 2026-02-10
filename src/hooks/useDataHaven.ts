@@ -136,6 +136,20 @@ interface UseDataHavenReturn {
     newStatus: CommitmentStatus,
     reason: string
   ) => Promise<StatusUpdateResult>;
+
+  // Commitment history
+  loadCommitmentHistory: (
+    bucketId: string,
+    commitmentId: string
+  ) => Promise<Array<{ data: Commitment; fileKey: string; uploadedAt: Date }>>;
+
+  // Binary file operations
+  uploadBinaryFile: (
+    bucketId: string,
+    filePath: string,
+    file: File | Blob,
+  ) => Promise<{ fileKey: string; fileName: string; fileSize: number; fileType: string } | null>;
+  downloadBinaryFile: (fileKey: string) => Promise<Blob | null>;
 }
 
 export const useDataHaven = (): UseDataHavenReturn => {
@@ -1004,6 +1018,94 @@ export const useDataHaven = (): UseDataHavenReturn => {
     [address, isInitialized, authenticate]
   );
 
+  /**
+   * Load all historical versions of a commitment (no deduplication)
+   */
+  const loadCommitmentHistory = useCallback(
+    async (
+      bucketId: string,
+      commitmentId: string
+    ): Promise<Array<{ data: Commitment; fileKey: string; uploadedAt: Date }>> => {
+      if (!isReadOnlyReady && !isInitialized) {
+        return [];
+      }
+
+      try {
+        const { loadCommitmentHistory: loadHistoryFn } = await import('@/lib/datahaven/client');
+        return await loadHistoryFn<Commitment>(bucketId, commitmentId);
+      } catch (err) {
+        console.error('Failed to load commitment history:', err);
+        return [];
+      }
+    },
+    [isReadOnlyReady, isInitialized]
+  );
+
+  /**
+   * Upload a binary file (image, PDF, etc.) to DataHaven
+   */
+  const uploadBinaryFile = useCallback(
+    async (
+      bucketId: string,
+      filePath: string,
+      file: File | Blob,
+    ): Promise<{ fileKey: string; fileName: string; fileSize: number; fileType: string } | null> => {
+      if (!address || !isInitialized) {
+        setError(new Error('Not initialized'));
+        return null;
+      }
+
+      try {
+        const {
+          uploadBinaryFile: uploadBinaryFn,
+          isAuthenticated: checkAuth,
+        } = await import('@/lib/datahaven/client');
+
+        if (!checkAuth()) {
+          const authSuccess = await authenticate();
+          if (!authSuccess) return null;
+        }
+
+        const result = await uploadBinaryFn(bucketId, filePath, file, address);
+
+        const fileName = filePath.split('/').pop() || 'unknown';
+        const fileType = file instanceof File ? file.type : 'application/octet-stream';
+
+        return {
+          fileKey: result.fileKey,
+          fileName,
+          fileSize: file.size,
+          fileType,
+        };
+      } catch (err) {
+        console.error('Failed to upload binary file:', err);
+        setError(err instanceof Error ? err : new Error('Binary upload failed'));
+        return null;
+      }
+    },
+    [address, isInitialized, authenticate]
+  );
+
+  /**
+   * Download a binary file from DataHaven
+   */
+  const downloadBinaryFile = useCallback(
+    async (fileKey: string): Promise<Blob | null> => {
+      if (!isReadOnlyReady && !isInitialized) {
+        return null;
+      }
+
+      try {
+        const { downloadBinaryFile: downloadBinaryFn } = await import('@/lib/datahaven/client');
+        return await downloadBinaryFn(fileKey);
+      } catch (err) {
+        console.error('Failed to download binary file:', err);
+        return null;
+      }
+    },
+    [isReadOnlyReady, isInitialized]
+  );
+
   // Auto-initialize read-only when WASM is ready (no wallet needed)
   useEffect(() => {
     if (wasmInitialized && !isReadOnlyReady && !isLoading) {
@@ -1059,6 +1161,11 @@ export const useDataHaven = (): UseDataHavenReturn => {
     verifyBucketOwnership,
     // Commitment status update
     updateCommitmentStatus,
+    // Commitment history
+    loadCommitmentHistory,
+    // Binary file operations
+    uploadBinaryFile,
+    downloadBinaryFile,
   };
 };
 

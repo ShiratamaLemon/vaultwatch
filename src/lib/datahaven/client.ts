@@ -1787,6 +1787,201 @@ export const loadCommitmentsFromBucket = async <T>(bucketId: string): Promise<T[
 };
 
 /**
+ * Load all versions of a specific commitment from a VaultWatch bucket (no deduplication)
+ * Returns all historical versions sorted oldest-first for diff display.
+ * @param bucketId - The bucket ID
+ * @param commitmentId - The commitment UUID
+ */
+export const loadCommitmentHistory = async <T>(
+  bucketId: string,
+  commitmentId: string
+): Promise<Array<{ data: T; fileKey: string; uploadedAt: Date }>> => {
+  try {
+    const fileName = `${commitmentId}.json`;
+
+    // Get commitment files from MSP
+    let commitmentFiles: FileTree[] = [];
+
+    try {
+      const commitmentsFileList = await getBucketFiles(bucketId, '/commitments');
+      commitmentFiles = commitmentsFileList.files.filter(f => f.type === 'file');
+
+      if (commitmentFiles.length === 0) {
+        const rootFolder = commitmentsFileList.files.find(f => f.name === '/' || f.name === 'commitments');
+        if (rootFolder && 'children' in rootFolder) {
+          const children = (rootFolder as { children: FileTree[] }).children;
+          commitmentFiles = children.filter((f): f is FileTree & { type: 'file' } => f.type === 'file');
+        }
+      }
+    } catch {
+      const fileList = await getBucketFiles(bucketId);
+      commitmentFiles = getFilesFromFolder(fileList.files, 'commitments');
+    }
+
+    // Filter to only versions of the target commitment (all versions, no dedup)
+    const matchingFiles = commitmentFiles.filter(
+      (f): f is FileTree & { type: 'file'; uploadedAt: Date; fileKey: `0x${string}` } =>
+        f.type === 'file' && f.name === fileName
+    );
+
+    if (matchingFiles.length === 0) {
+      return [];
+    }
+
+    // Sort oldest first
+    matchingFiles.sort((a, b) => {
+      const timeA = a.uploadedAt ? new Date(a.uploadedAt).getTime() : 0;
+      const timeB = b.uploadedAt ? new Date(b.uploadedAt).getTime() : 0;
+      return timeA - timeB;
+    });
+
+    // Download and parse each version
+    const results: Array<{ data: T; fileKey: string; uploadedAt: Date }> = [];
+    for (const file of matchingFiles) {
+      try {
+        const wrapper = await downloadAndParseJson<StorageWrapper<T>>(file.fileKey);
+        results.push({
+          data: wrapper.data,
+          fileKey: file.fileKey,
+          uploadedAt: new Date(file.uploadedAt),
+        });
+      } catch (error) {
+        console.warn(`Failed to load commitment version ${file.fileKey}:`, error);
+      }
+    }
+
+    console.log(`Loaded ${results.length} versions of commitment ${commitmentId}`);
+    return results;
+  } catch (error) {
+    console.error(`Failed to load commitment history for ${commitmentId}:`, error);
+    return [];
+  }
+};
+
+/**
+ * Upload a binary file (image, PDF, etc.) to DataHaven
+ */
+export const uploadBinaryFile = async (
+  bucketId: string,
+  filePath: string,
+  file: File | Blob,
+  ownerAddress: string
+): Promise<FileUploadResult> => {
+  if (!storageHubClientInstance || !mspClientInstance || !publicClientInstance) {
+    throw new DataHavenError('Clients not initialized', 'NOT_INITIALIZED');
+  }
+
+  try {
+    const fileSize = file.size;
+
+    const fileManager = new FileManager({
+      size: fileSize,
+      stream: () => file.stream() as ReadableStream<Uint8Array>,
+    });
+
+    const fingerprint = await fileManager.getFingerprint();
+    console.log(`Binary file fingerprint: ${fingerprint.toHex()}`);
+
+    const { mspId, multiaddresses } = await getMspInfo();
+    if (!multiaddresses?.length) {
+      throw new Error('MSP multiaddresses are missing');
+    }
+
+    const peerIds = extractPeerIDs(multiaddresses);
+    if (peerIds.length === 0) {
+      throw new Error('MSP multiaddresses had no /p2p/<peerId> segment');
+    }
+
+    const txHash = await storageHubClientInstance.issueStorageRequest(
+      bucketId as `0x${string}`,
+      filePath,
+      fingerprint.toHex() as `0x${string}`,
+      BigInt(fileSize),
+      mspId as `0x${string}`,
+      peerIds,
+      ReplicationLevel.Custom,
+      1
+    );
+
+    console.log('Binary issueStorageRequest() txHash:', txHash);
+    if (!txHash) {
+      throw new Error('issueStorageRequest() did not return a transaction hash');
+    }
+
+    const receipt = await publicClientInstance.waitForTransactionReceipt({
+      hash: txHash,
+    });
+
+    if (receipt.status !== 'success') {
+      throw new Error(`Storage request failed: ${txHash}`);
+    }
+
+    const blockNumber = receipt.blockNumber ? Number(receipt.blockNumber) : undefined;
+
+    const registry = new TypeRegistry();
+    const owner = registry.createType('AccountId20', ownerAddress) as AccountId20;
+    const bucketIdH256 = registry.createType('H256', bucketId) as H256;
+    const fileKey = await fileManager.computeFileKey(owner, bucketIdH256, filePath);
+
+    const uploadReceipt = await mspClientInstance.files.uploadFile(
+      bucketId,
+      fileKey.toHex(),
+      await fileManager.getFileBlob(),
+      ownerAddress,
+      filePath
+    );
+
+    if (uploadReceipt.status !== 'upload_successful') {
+      throw new Error('Binary file upload to MSP failed');
+    }
+
+    return {
+      fileKey: fileKey.toHex(),
+      merkleRoot: uploadReceipt.fingerprint,
+      txHash,
+      blockNumber,
+      size: fileSize,
+    };
+  } catch (error) {
+    console.error('Failed to upload binary file:', error);
+    throw new FileUploadError('Failed to upload binary file', error);
+  }
+};
+
+/**
+ * Download a binary file from DataHaven
+ * @param fileKey - The file key to download
+ * @returns Blob of the downloaded file, or null if not found
+ */
+export const downloadBinaryFile = async (fileKey: string): Promise<Blob | null> => {
+  if (!mspClientInstance) {
+    throw new DataHavenError('MSP client not initialized', 'NOT_INITIALIZED');
+  }
+
+  try {
+    const downloadResponse: DownloadResult = await mspClientInstance.files.downloadFile(fileKey);
+
+    if (downloadResponse.status !== 200) {
+      throw new Error(`Download failed with status: ${downloadResponse.status}`);
+    }
+
+    const reader = downloadResponse.stream.getReader();
+    const chunks: BlobPart[] = [];
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (value) chunks.push(value as BlobPart);
+    }
+
+    return new Blob(chunks);
+  } catch (error) {
+    console.error('Failed to download binary file:', error);
+    return null;
+  }
+};
+
+/**
  * Load project metadata from a VaultWatch bucket with verification
  * @param bucketId - The bucket ID
  * @returns Project data with verification result
