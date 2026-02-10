@@ -686,11 +686,14 @@ export const useDataHaven = (): UseDataHavenReturn => {
           const project = await loadProjectFromBucket<Project>(cached.bucketId);
           results.push({
             bucket: {
-              bucketId: cached.bucketId,
+              bucketId: cached.bucketId as `0x${string}`,
               name: `vaultwatch-${cached.id}`,
-              root: '',
+              root: '0x' as `0x${string}`,
+              isPublic: true,
+              sizeBytes: 0,
+              valuePropId: '',
               fileCount: cached.commitmentCount + 1,
-            } as Bucket,
+            },
             project,
           });
         }
