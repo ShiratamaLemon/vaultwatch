@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAccount } from 'wagmi';
 import { v4 as uuidv4 } from 'uuid';
-import { Loader2, Calendar, AlertCircle, Upload, X, FileText } from 'lucide-react';
+import { Loader2, Calendar, AlertCircle, Upload, X, FileText, ShieldAlert } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -17,6 +17,14 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { TransactionSuccessModal } from '@/components/ui/transaction-success-modal';
 import { toast } from 'sonner';
 import { useProjectStore } from '@/stores/projectStore';
@@ -56,6 +64,7 @@ export const CommitmentForm = ({ projectId, bucketId }: CommitmentFormProps) => 
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
+  const [showEvidenceWarning, setShowEvidenceWarning] = useState(false);
   const [transactionResult, setTransactionResult] = useState<TransactionResult | null>(null);
   const [evidenceFiles, setEvidenceFiles] = useState<File[]>([]);
   const [isUploadingEvidence, setIsUploadingEvidence] = useState(false);
@@ -128,7 +137,6 @@ export const CommitmentForm = ({ projectId, bucketId }: CommitmentFormProps) => 
       return;
     }
 
-    // Check if DataHaven is initialized
     if (!isInitialized) {
       toast.error('DataHaven is not ready. Please wait for initialization...');
       try {
@@ -144,6 +152,18 @@ export const CommitmentForm = ({ projectId, bucketId }: CommitmentFormProps) => 
       toast.error(validationError);
       return;
     }
+
+    // Show warning modal if evidence files are attached
+    if (evidenceFiles.length > 0) {
+      setShowEvidenceWarning(true);
+      return;
+    }
+
+    await proceedSubmit();
+  };
+
+  const proceedSubmit = async () => {
+    if (!address) return;
 
     setIsSubmitting(true);
 
@@ -167,9 +187,13 @@ export const CommitmentForm = ({ projectId, bucketId }: CommitmentFormProps) => 
         setIsUploadingEvidence(true);
         toast.info(`Uploading ${evidenceFiles.length} evidence file(s)...`);
 
+        // Strip EXIF metadata from images before upload
+        const { stripImageMetadata } = await import('@/lib/image-utils');
+
         for (const file of evidenceFiles) {
-          const filePath = `evidence/${commitmentId}/${file.name}`;
-          const result = await uploadBinaryFile(bucketId, filePath, file);
+          const cleanFile = await stripImageMetadata(file);
+          const filePath = `evidence/${commitmentId}/${cleanFile.name}`;
+          const result = await uploadBinaryFile(bucketId, filePath, cleanFile);
           if (result) {
             uploadedEvidence.push(result);
           } else {
@@ -312,6 +336,58 @@ export const CommitmentForm = ({ projectId, bucketId }: CommitmentFormProps) => 
 
   return (
     <>
+      {/* Evidence Upload Warning Modal */}
+      <Dialog open={showEvidenceWarning} onOpenChange={setShowEvidenceWarning}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <ShieldAlert className="h-5 w-5 text-yellow-500" />
+              Evidence Upload Warning
+            </DialogTitle>
+            <DialogDescription className="text-left">
+              Please review before proceeding.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-3 py-2">
+            <div className="rounded-md bg-yellow-500/10 border border-yellow-500/20 p-3 text-sm space-y-2">
+              <p className="font-medium text-yellow-400">
+                The following files will be permanently stored on DataHaven:
+              </p>
+              <ul className="list-disc list-inside text-muted-foreground space-y-0.5">
+                {evidenceFiles.map((f, i) => (
+                  <li key={i} className="truncate">{f.name} ({(f.size / 1024).toFixed(0)} KB)</li>
+                ))}
+              </ul>
+            </div>
+
+            <div className="rounded-md bg-muted/50 p-3 text-xs text-muted-foreground space-y-1.5">
+              <p><strong>Permanent & Public:</strong> Once uploaded, these files cannot be deleted or modified. They will be publicly accessible to anyone.</p>
+              <p><strong>Metadata Removal:</strong> EXIF metadata (GPS location, device info, etc.) will be automatically stripped from images before upload.</p>
+              <p><strong>Before proceeding:</strong> Ensure the files do not contain personal information, credentials, or sensitive data.</p>
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setShowEvidenceWarning(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={() => {
+                setShowEvidenceWarning(false);
+                proceedSubmit();
+              }}
+              className="bg-emerald-600 hover:bg-emerald-700"
+            >
+              I Understand, Proceed
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* Success Modal */}
       <TransactionSuccessModal
         open={showSuccessModal}
