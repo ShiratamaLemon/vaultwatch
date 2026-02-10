@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { Container } from '@/components/layout/Container';
 import { useDataHaven } from '@/hooks/useDataHaven';
 import { useProjectStore } from '@/stores/projectStore';
@@ -14,7 +14,6 @@ interface Stats {
 
 export const HomeStats = () => {
   const { isReadOnlyReady, isInitialized, listVaultWatchProjects } = useDataHaven();
-  const cachedProjects = useProjectStore((s) => s.projects);
   const [stats, setStats] = useState<Stats>({
     projectCount: 0,
     commitmentCount: 0,
@@ -22,50 +21,56 @@ export const HomeStats = () => {
   });
   const [isLoading, setIsLoading] = useState(true);
 
+  // Refs to prevent re-execution and avoid unstable deps
+  const hasLoadedRef = useRef(false);
+  const listProjectsRef = useRef(listVaultWatchProjects);
+  listProjectsRef.current = listVaultWatchProjects;
+
   useEffect(() => {
     const loadStats = async () => {
-      if (isReadOnlyReady || isInitialized) {
-        setIsLoading(true);
-        try {
-          const projects = await listVaultWatchProjects();
+      if (!(isReadOnlyReady || isInitialized) || hasLoadedRef.current) return;
+      hasLoadedRef.current = true;
 
-          // Count projects
-          const projectCount = projects.filter(p => p.project !== null).length;
+      setIsLoading(true);
+      try {
+        const projects = await listProjectsRef.current();
 
-          // Count commitments from all projects
-          let totalCommitments = 0;
-          for (const { project } of projects) {
-            if (project && 'commitmentCount' in project) {
-              totalCommitments += (project as { commitmentCount?: number }).commitmentCount || 0;
-            }
+        // Count projects
+        const projectCount = projects.filter(p => p.project !== null).length;
+
+        // Count commitments from all projects
+        let totalCommitments = 0;
+        for (const { project } of projects) {
+          if (project && 'commitmentCount' in project) {
+            totalCommitments += (project as { commitmentCount?: number }).commitmentCount || 0;
           }
-
-          // Calculate avg transparency from cached scores
-          const scores = cachedProjects
-            .map((p) => p.transparencyScore)
-            .filter((s): s is number => s != null);
-          const avgTransparency =
-            scores.length > 0
-              ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length).toString()
-              : '\u2014';
-
-          setStats({
-            projectCount,
-            commitmentCount: totalCommitments || projectCount * 3, // Estimate if not available
-            avgTransparency,
-          });
-        } catch (error) {
-          console.error('Failed to load stats:', error);
-        } finally {
-          setIsLoading(false);
         }
-      } else {
+
+        // Read cached scores directly from store (not via subscription to avoid circular deps)
+        const cachedProjects = useProjectStore.getState().projects;
+        const scores = cachedProjects
+          .map((p) => p.transparencyScore)
+          .filter((s): s is number => s != null);
+        const avgTransparency =
+          scores.length > 0
+            ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length).toString()
+            : '\u2014';
+
+        setStats({
+          projectCount,
+          commitmentCount: totalCommitments || projectCount * 3, // Estimate if not available
+          avgTransparency,
+        });
+      } catch (error) {
+        console.error('Failed to load stats:', error);
+        hasLoadedRef.current = false; // Allow retry on error
+      } finally {
         setIsLoading(false);
       }
     };
 
     loadStats();
-  }, [isReadOnlyReady, isInitialized, listVaultWatchProjects, cachedProjects]);
+  }, [isReadOnlyReady, isInitialized]);
 
   const statsData = [
     {

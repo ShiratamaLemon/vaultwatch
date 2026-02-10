@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
 import { useAccount } from 'wagmi';
 import { Loader2, Info } from 'lucide-react';
 import { Container } from '@/components/layout/Container';
@@ -25,16 +25,22 @@ export default function ProjectsPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<ProjectCategory | 'all'>('all');
   const [showWatchlistOnly, setShowWatchlistOnly] = useState(false);
-  const { watchedBucketIds } = useProjectStore();
+  const watchedBucketIds = useProjectStore((s) => s.watchedBucketIds);
+
+  // Refs to prevent concurrent loads and avoid unstable function deps
+  const loadingRef = useRef(false);
+  const listProjectsRef = useRef(listVaultWatchProjects);
+  listProjectsRef.current = listVaultWatchProjects;
 
   // Load projects when read-only or full initialization is ready
   useEffect(() => {
     const loadProjects = async () => {
-      if (!(isReadOnlyReady || isInitialized) || hasLoaded || isLoading) return;
+      if (!(isReadOnlyReady || isInitialized) || hasLoaded || loadingRef.current) return;
+      loadingRef.current = true;
 
       setIsLoading(true);
       try {
-        const results = await listVaultWatchProjects();
+        const results = await listProjectsRef.current();
 
         // Convert to ProjectIndexEntry format
         // Preserve cached lastUpdated if newer (detail page updates it on commitment activity)
@@ -62,12 +68,13 @@ export default function ProjectsPage() {
       } catch (error) {
         console.error('Failed to load projects:', error);
       } finally {
+        loadingRef.current = false;
         setIsLoading(false);
       }
     };
 
     loadProjects();
-  }, [isReadOnlyReady, isInitialized, hasLoaded, isLoading, listVaultWatchProjects]);
+  }, [isReadOnlyReady, isInitialized, hasLoaded]);
 
   // Re-load when wallet connects (to get fresh data from authenticated MSP)
   useEffect(() => {

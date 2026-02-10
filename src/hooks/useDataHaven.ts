@@ -29,6 +29,13 @@ import type {
 import type { Project, Commitment, CommitmentStatus, ProjectIndexEntry } from '@/types';
 import { useProjectStore } from '@/stores/projectStore';
 
+// Module-level deduplication for multi-instance safety
+// (multiple components using useDataHaven share these promises)
+let _readOnlyPromise: Promise<void> | null = null;
+let _fullInitPromise: Promise<MspHealthStatus | null> | null = null;
+let _fullInitAddress: string | null = null;
+let _authPromise: Promise<boolean> | null = null;
+
 interface StatusUpdateResult {
   success: boolean;
   fileKey?: string;
@@ -167,40 +174,52 @@ export const useDataHaven = (): UseDataHavenReturn => {
 
   /**
    * Initialize DataHaven clients
+   * Uses module-level promise to deduplicate across multiple hook instances.
    */
   const initialize = useCallback(async () => {
     if (!wasmInitialized || !address || !walletClient || !publicClient) {
       return;
     }
 
+    // Reset promise if address changed (e.g., account switch)
+    if (_fullInitAddress !== address) {
+      _fullInitPromise = null;
+      _fullInitAddress = address;
+    }
+
+    if (!_fullInitPromise) {
+      _fullInitPromise = (async () => {
+        const {
+          initPolkadotApi,
+          initStorageHubClient,
+          initMspClient,
+          initPublicClient,
+          checkMspHealth,
+        } = await import('@/lib/datahaven/client');
+
+        await initPolkadotApi();
+        initStorageHubClient(datahavenTestnet, walletClient);
+        initPublicClient(datahavenTestnet);
+        await initMspClient(address);
+
+        const health = await checkMspHealth();
+        console.log('✅ DataHaven clients initialized');
+        return health;
+      })();
+    }
+
     setIsLoading(true);
     setError(null);
 
     try {
-      const {
-        initPolkadotApi,
-        initStorageHubClient,
-        initMspClient,
-        initPublicClient,
-        checkMspHealth,
-      } = await import('@/lib/datahaven/client');
-
-      // Initialize all clients
-      await initPolkadotApi();
-      initStorageHubClient(datahavenTestnet, walletClient);
-      initPublicClient(datahavenTestnet);
-      await initMspClient(address);
-
-      // Check MSP health
-      const health = await checkMspHealth();
+      const health = await _fullInitPromise;
       setMspHealth(health);
-
       setIsInitialized(true);
       setIsReadOnlyReady(true);
-      console.log('✅ DataHaven clients initialized');
     } catch (err) {
       console.error('Failed to initialize DataHaven:', err);
       setError(err instanceof Error ? err : new Error('Initialization failed'));
+      _fullInitPromise = null;
     } finally {
       setIsLoading(false);
     }
@@ -209,22 +228,31 @@ export const useDataHaven = (): UseDataHavenReturn => {
   /**
    * Initialize read-only clients (no wallet required)
    * Enables browsing projects without connecting a wallet.
+   * Uses module-level promise to deduplicate across multiple hook instances.
    */
   const initReadOnly = useCallback(async () => {
-    if (!wasmInitialized || isReadOnlyReady || isLoading) return;
+    if (!wasmInitialized || isReadOnlyReady) return;
+
+    if (!_readOnlyPromise) {
+      _readOnlyPromise = (async () => {
+        const { initializeReadOnly } = await import('@/lib/datahaven/client');
+        await initializeReadOnly(datahavenTestnet);
+        console.log('✅ DataHaven read-only clients initialized');
+      })();
+    }
 
     try {
-      const { initializeReadOnly } = await import('@/lib/datahaven/client');
-      await initializeReadOnly(datahavenTestnet);
+      await _readOnlyPromise;
       setIsReadOnlyReady(true);
-      console.log('✅ DataHaven read-only clients initialized');
     } catch (err) {
       console.error('Failed to initialize read-only mode:', err);
+      _readOnlyPromise = null;
     }
-  }, [wasmInitialized, isReadOnlyReady, isLoading]);
+  }, [wasmInitialized, isReadOnlyReady]);
 
   /**
    * Authenticate with SIWE
+   * Uses module-level promise to prevent concurrent SIWE signature prompts.
    */
   const authenticate = useCallback(async (): Promise<boolean> => {
     if (!walletClient || !isInitialized) {
@@ -232,21 +260,39 @@ export const useDataHaven = (): UseDataHavenReturn => {
       return false;
     }
 
+    // Deduplicate concurrent auth attempts (e.g., from multiple hook instances)
+    if (_authPromise) {
+      try {
+        const result = await _authPromise;
+        if (result) setIsAuthenticated(true);
+        return result;
+      } catch {
+        // Error already logged by primary auth attempt
+        return false;
+      }
+    }
+
     setIsLoading(true);
     setError(null);
 
-    try {
+    _authPromise = (async () => {
       const { authenticateWithSIWE } = await import('@/lib/datahaven/client');
       await authenticateWithSIWE(walletClient);
-      setIsAuthenticated(true);
       console.log('✅ SIWE authentication successful');
       return true;
+    })();
+
+    try {
+      const result = await _authPromise;
+      setIsAuthenticated(true);
+      return result;
     } catch (err) {
       console.error('SIWE authentication failed:', err);
       setError(err instanceof Error ? err : new Error('Authentication failed'));
       return false;
     } finally {
       setIsLoading(false);
+      _authPromise = null;
     }
   }, [walletClient, isInitialized]);
 
@@ -1119,18 +1165,20 @@ export const useDataHaven = (): UseDataHavenReturn => {
   );
 
   // Auto-initialize read-only when WASM is ready (no wallet needed)
+  // Module-level promise dedup prevents concurrent init from multiple instances
   useEffect(() => {
-    if (wasmInitialized && !isReadOnlyReady && !isLoading) {
+    if (wasmInitialized && !isReadOnlyReady) {
       initReadOnly();
     }
-  }, [wasmInitialized, isReadOnlyReady, isLoading, initReadOnly]);
+  }, [wasmInitialized, isReadOnlyReady, initReadOnly]);
 
   // Auto-initialize full mode when wallet connects
+  // Module-level promise dedup prevents concurrent init from multiple instances
   useEffect(() => {
-    if (isConnected && wasmInitialized && !isInitialized && !isLoading) {
+    if (isConnected && wasmInitialized && !isInitialized) {
       initialize();
     }
-  }, [isConnected, wasmInitialized, isInitialized, isLoading, initialize]);
+  }, [isConnected, wasmInitialized, isInitialized, initialize]);
 
   // Cleanup on disconnect (keep read-only mode active)
   useEffect(() => {
@@ -1138,6 +1186,10 @@ export const useDataHaven = (): UseDataHavenReturn => {
       setIsInitialized(false);
       setIsAuthenticated(false);
       setMspHealth(null);
+      // Reset module-level state to allow re-init on reconnect
+      _fullInitPromise = null;
+      _fullInitAddress = null;
+      _authPromise = null;
     }
   }, [isConnected]);
 

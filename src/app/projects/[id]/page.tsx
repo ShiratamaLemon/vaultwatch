@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { useAccount } from 'wagmi';
@@ -85,21 +85,32 @@ export default function ProjectDetailPage() {
     id: string;
   } | null>(null);
 
+  // Refs to prevent concurrent/duplicate loads and avoid unstable function deps
+  const loadingRef = useRef(false);
+  const hasLoadedRef = useRef<string | null>(null);
+  const fnRefs = useRef({ loadProject, loadCommitments, loadProjectWithVerification, loadCommitmentsWithVerification });
+  fnRefs.current = { loadProject, loadCommitments, loadProjectWithVerification, loadCommitmentsWithVerification };
+
   // Load project and commitments from MSP with verification
   useEffect(() => {
     const loadData = async () => {
       if ((!isReadOnlyReady && !isInitialized) || !bucketId) return;
+      if (loadingRef.current || hasLoadedRef.current === bucketId) return;
+      loadingRef.current = true;
 
       setIsLoading(true);
       setError(null);
       setProjectVerification('pending');
 
       try {
+        const fns = fnRefs.current;
+
         // Step 1: Load project metadata immediately (without verification for fast display)
-        const projectData = await loadProject(bucketId);
+        const projectData = await fns.loadProject(bucketId);
         if (!projectData) {
           setError('Project not found');
           setIsLoading(false);
+          loadingRef.current = false;
           return;
         }
 
@@ -107,7 +118,7 @@ export default function ProjectDetailPage() {
         setProject({ ...projectData, bucketId });
 
         // Step 2: Load commitments immediately (without verification for fast display)
-        const commitmentsData = await loadCommitments(bucketId);
+        const commitmentsData = await fns.loadCommitments(bucketId);
         setCommitments(commitmentsData);
 
         console.log(`✅ Loaded project "${projectData.name}" with ${commitmentsData.length} commitments`);
@@ -124,7 +135,7 @@ export default function ProjectDetailPage() {
         }
 
         // Step 3: Verify project metadata in background
-        const projectVerificationResult = await loadProjectWithVerification(bucketId);
+        const projectVerificationResult = await fns.loadProjectWithVerification(bucketId);
         if (projectVerificationResult.data) {
           setProject({ ...projectVerificationResult.data, bucketId });
         }
@@ -138,8 +149,8 @@ export default function ProjectDetailPage() {
         });
 
         // Step 4: Verify commitments in background
-        const commitmentsVerificationResult = await loadCommitmentsWithVerification(bucketId);
-        
+        const commitmentsVerificationResult = await fns.loadCommitmentsWithVerification(bucketId);
+
         // Update commitments with verified data
         const verifiedCommitments = commitmentsVerificationResult.map((r) => r.data);
         setCommitments(verifiedCommitments);
@@ -158,6 +169,8 @@ export default function ProjectDetailPage() {
         setCommitmentVerifications(verifications);
         setCommitmentVerificationDetails(verificationDetailMap);
 
+        hasLoadedRef.current = bucketId;
+
         // Log verification warnings if any
         commitmentsVerificationResult.forEach(({ data, verification }) => {
           if (!verification.verified) {
@@ -171,20 +184,13 @@ export default function ProjectDetailPage() {
         setError('Failed to load project data');
         setProjectVerification('unavailable');
       } finally {
+        loadingRef.current = false;
         setIsLoading(false);
       }
     };
 
     loadData();
-  }, [
-    isReadOnlyReady,
-    isInitialized,
-    bucketId,
-    loadProject,
-    loadCommitments,
-    loadProjectWithVerification,
-    loadCommitmentsWithVerification,
-  ]);
+  }, [isReadOnlyReady, isInitialized, bucketId]);
 
   // Handle commitment status update
   const handleStatusUpdate = useCallback(
