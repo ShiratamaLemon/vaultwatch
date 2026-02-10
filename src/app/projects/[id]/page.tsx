@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { useAccount } from 'wagmi';
@@ -24,7 +24,10 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Separator } from '@/components/ui/separator';
 import { CommitmentTimeline } from '@/components/commitment/CommitmentTimeline';
 import { VerificationBadge } from '@/components/ui/verification-badge';
+import { TransparencyScoreBadge } from '@/components/project/TransparencyScoreBadge';
 import { useDataHaven } from '@/hooks/useDataHaven';
+import { useProjectStore } from '@/stores/projectStore';
+import { calculateTransparencyScore } from '@/lib/transparency-score';
 import { PROJECT_CATEGORY_LABELS, PROJECT_STATUS_LABELS } from '@/types';
 import { getAccountLink } from '@/lib/datahaven/explorer';
 import { toast } from 'sonner';
@@ -191,6 +194,21 @@ export default function ProjectDetailPage() {
     },
     [bucketId, commitments, updateCommitmentStatus, address]
   );
+
+  // Calculate transparency score from commitments
+  const transparencyScore = useMemo(
+    () => calculateTransparencyScore(commitments),
+    [commitments]
+  );
+
+  // Cache score to project store for use on listing page
+  useEffect(() => {
+    if (transparencyScore && project) {
+      useProjectStore.getState().updateProject(project.id, {
+        transparencyScore: transparencyScore.score,
+      });
+    }
+  }, [transparencyScore, project]);
 
   // Show loading state
   if (isDataHavenLoading || isLoading) {
@@ -382,6 +400,9 @@ export default function ProjectDetailPage() {
 
           {/* Sidebar */}
           <div className="space-y-6">
+            {/* Transparency Score */}
+            <TransparencyScoreBadge score={transparencyScore} variant="detailed" />
+
             {/* Verification Card */}
             <Card className="border-emerald-500/20 bg-emerald-500/5">
               <CardHeader className="pb-3">

@@ -94,6 +94,7 @@ export interface ProjectIndexEntry {
   bucketId: string;
   commitmentCount: number;
   lastUpdated: number;
+  transparencyScore?: number;
 }
 
 /**

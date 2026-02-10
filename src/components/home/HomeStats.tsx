@@ -3,20 +3,22 @@
 import { useEffect, useState } from 'react';
 import { Container } from '@/components/layout/Container';
 import { useDataHaven } from '@/hooks/useDataHaven';
+import { useProjectStore } from '@/stores/projectStore';
 import { Skeleton } from '@/components/ui/skeleton';
 
 interface Stats {
   projectCount: number;
   commitmentCount: number;
-  verifiedPercentage: string;
+  avgTransparency: string;
 }
 
 export const HomeStats = () => {
   const { isReadOnlyReady, isInitialized, listVaultWatchProjects } = useDataHaven();
+  const cachedProjects = useProjectStore((s) => s.projects);
   const [stats, setStats] = useState<Stats>({
     projectCount: 0,
     commitmentCount: 0,
-    verifiedPercentage: '100%',
+    avgTransparency: '\u2014',
   });
   const [isLoading, setIsLoading] = useState(true);
 
@@ -38,10 +40,19 @@ export const HomeStats = () => {
             }
           }
 
+          // Calculate avg transparency from cached scores
+          const scores = cachedProjects
+            .map((p) => p.transparencyScore)
+            .filter((s): s is number => s != null);
+          const avgTransparency =
+            scores.length > 0
+              ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length).toString()
+              : '\u2014';
+
           setStats({
             projectCount,
             commitmentCount: totalCommitments || projectCount * 3, // Estimate if not available
-            verifiedPercentage: '100%',
+            avgTransparency,
           });
         } catch (error) {
           console.error('Failed to load stats:', error);
@@ -54,7 +65,7 @@ export const HomeStats = () => {
     };
 
     loadStats();
-  }, [isReadOnlyReady, isInitialized, listVaultWatchProjects]);
+  }, [isReadOnlyReady, isInitialized, listVaultWatchProjects, cachedProjects]);
 
   const statsData = [
     {
@@ -66,8 +77,8 @@ export const HomeStats = () => {
       value: isLoading ? null : stats.commitmentCount.toString(),
     },
     {
-      label: 'Verified Records',
-      value: stats.verifiedPercentage,
+      label: 'Avg. Transparency',
+      value: isLoading ? null : stats.avgTransparency,
     },
   ];
 

@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { ExternalLink, FileText, CheckCircle } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { getGradeFromScore } from '@/lib/transparency-score';
 import type { ProjectIndexEntry, ProjectCategory } from '@/types';
 import { PROJECT_CATEGORY_LABELS } from '@/types';
 
@@ -53,9 +54,19 @@ export const ProjectCard = ({ project }: ProjectCardProps) => {
               <FileText className="h-4 w-4" />
               <span>{project.commitmentCount} commitments</span>
             </div>
-            <div className="flex items-center space-x-1 text-emerald-400">
-              <CheckCircle className="h-4 w-4" />
-              <span>Verified</span>
+            <div className="flex items-center gap-3">
+              {project.transparencyScore != null && (() => {
+                const { grade, color } = getGradeFromScore(project.transparencyScore);
+                return (
+                  <span className={`text-xs font-semibold ${color}`}>
+                    {grade} {project.transparencyScore}
+                  </span>
+                );
+              })()}
+              <div className="flex items-center space-x-1 text-emerald-400">
+                <CheckCircle className="h-4 w-4" />
+                <span>Verified</span>
+              </div>
             </div>
           </div>
           <div className="mt-3 text-xs text-muted-foreground">
