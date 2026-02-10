@@ -670,49 +670,38 @@ export const useDataHaven = (): UseDataHavenReturn => {
       }
     }
 
-    // Read-only mode: use cache if fresh, otherwise discover from on-chain
+    // Read-only mode: load from seed bucket IDs + cache
     if (isReadOnlyReady) {
-      const CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
-      const store = useProjectStore.getState();
-      const cacheAge = store.lastSyncedAt ? Date.now() - store.lastSyncedAt : Infinity;
+      // Collect known bucket IDs from seed env var + cache
+      const seedIds = (process.env.NEXT_PUBLIC_SEED_BUCKET_IDS || '')
+        .split(',')
+        .map((id) => id.trim())
+        .filter(Boolean);
+      const cachedIds = useProjectStore.getState().projects.map((p) => p.bucketId);
+      const allIds = [...new Set([...seedIds, ...cachedIds])];
 
-      // Serve from cache if fresh
-      if (store.projects.length > 0 && cacheAge < CACHE_TTL_MS) {
-        console.log(`✅ Using cached projects (age: ${Math.round(cacheAge / 1000)}s)`);
-        const { loadProjectFromBucket } = await import('@/lib/datahaven/client');
+      if (allIds.length === 0) return [];
 
-        const results: Array<{ bucket: Bucket; project: Project | null }> = [];
-        for (const cached of store.projects) {
-          const project = await loadProjectFromBucket<Project>(cached.bucketId);
-          results.push({
-            bucket: {
-              bucketId: cached.bucketId as `0x${string}`,
-              name: `vaultwatch-${cached.id}`,
-              root: '0x' as `0x${string}`,
-              isPublic: true,
-              sizeBytes: 0,
-              valuePropId: '',
-              fileCount: cached.commitmentCount + 1,
-            },
-            project,
-          });
-        }
-        return results;
-      }
-
-      // Cache miss or stale: full on-chain discovery
       setIsLoading(true);
       setError(null);
 
       try {
-        const { discoverVaultWatchBuckets } = await import('@/lib/datahaven/client');
-        const discovered = await discoverVaultWatchBuckets<Project>();
+        const { loadProjectFromBucket } = await import('@/lib/datahaven/client');
 
-        const results: Array<{ bucket: Bucket; project: Project | null }> = discovered.map(
-          ({ bucketId, project }) => ({
+        const results: Array<{ bucket: Bucket; project: Project | null }> = [];
+        // Load in parallel
+        const loaded = await Promise.all(
+          allIds.map(async (bucketId) => {
+            const project = await loadProjectFromBucket<Project>(bucketId);
+            return { bucketId, project };
+          })
+        );
+
+        for (const { bucketId, project } of loaded) {
+          results.push({
             bucket: {
               bucketId: bucketId as `0x${string}`,
-              name: `vaultwatch-${project.id}`,
+              name: project ? `vaultwatch-${project.id}` : '',
               root: '0x' as `0x${string}`,
               isPublic: true,
               sizeBytes: 0,
@@ -720,10 +709,10 @@ export const useDataHaven = (): UseDataHavenReturn => {
               fileCount: 0,
             },
             project,
-          })
-        );
+          });
+        }
 
-        // Cache to project store
+        // Update cache with loaded data
         const indexEntries: ProjectIndexEntry[] = results
           .filter(({ project }) => project !== null)
           .map(({ bucket, project }) => ({
@@ -739,10 +728,10 @@ export const useDataHaven = (): UseDataHavenReturn => {
         useProjectStore.getState().setProjects(indexEntries);
         useProjectStore.getState().setSyncedAt(Date.now());
 
-        console.log(`✅ Discovered ${results.length} VaultWatch projects (read-only)`);
+        console.log(`✅ Loaded ${results.length} VaultWatch projects (read-only, seed+cache)`);
         return results;
       } catch (err) {
-        console.error('Failed to discover projects in read-only mode:', err);
+        console.error('Failed to load projects in read-only mode:', err);
         return [];
       } finally {
         setIsLoading(false);
