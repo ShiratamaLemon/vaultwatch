@@ -41,7 +41,7 @@ import type {
   VerificationStatus,
   VerifiedDownloadResult,
 } from './types';
-import { DataHavenError, BucketCreationError, FileUploadError, VerificationError } from './types';
+import { DataHavenError, BucketCreationError, FileUploadError, VerificationError, VAULTWATCH_APP_ID } from './types';
 
 // =============================================================================
 // Configuration
@@ -754,6 +754,7 @@ export const uploadJsonFile = async <T>(
     // Wrap data in storage format
     const wrapper: StorageWrapper<T> = {
       version: '1.0',
+      app: VAULTWATCH_APP_ID,
       type,
       data,
       timestamp: Date.now(),
@@ -1703,6 +1704,91 @@ export const loadProjectFromBucket = async <T>(bucketId: string): Promise<T | nu
   } catch (error) {
     console.error(`Failed to load project from bucket ${bucketId}:`, error);
     return null;
+  }
+};
+
+/**
+ * Discover VaultWatch projects by scanning all on-chain buckets.
+ * For each bucket, attempts to load metadata.json from MSP and checks
+ * if it matches the VaultWatch format (app === "vaultwatch" or has VaultWatch-specific fields).
+ *
+ * @returns Array of discovered bucket IDs with their project metadata
+ */
+export const discoverVaultWatchBuckets = async <T>(): Promise<
+  Array<{ bucketId: string; ownerAddress: string; project: T }>
+> => {
+  if (!polkadotApiInstance || !mspClientInstance) {
+    throw new DataHavenError('Clients not initialized for discovery', 'NOT_INITIALIZED');
+  }
+
+  try {
+    // Step 1: Enumerate all buckets from on-chain storage
+    const allBuckets = await polkadotApiInstance.query.providers.buckets.entries();
+    console.log(`Scanning ${allBuckets.length} on-chain buckets for VaultWatch projects...`);
+
+    const results: Array<{ bucketId: string; ownerAddress: string; project: T }> = [];
+
+    // Step 2: For each bucket, try to load metadata.json
+    for (const [key, value] of allBuckets) {
+      if (value.isEmpty) continue;
+
+      const bucketId = key.args[0].toString();
+      const bucketData = value.unwrap().toHuman() as {
+        root: string;
+        userId: string;
+        mspId: string;
+        private: boolean;
+      };
+
+      // Skip private buckets
+      if (bucketData.private) continue;
+
+      try {
+        // Try to get files from MSP
+        const fileList = await getBucketFiles(bucketId);
+        const metadataFile = findFileInTree(fileList.files, 'metadata.json');
+        if (!metadataFile || metadataFile.type !== 'file') continue;
+
+        // Download and check format
+        const wrapper = await downloadAndParseJson<StorageWrapper<T>>(metadataFile.fileKey);
+
+        // Primary check: app identifier
+        if (wrapper.app === VAULTWATCH_APP_ID && wrapper.type === 'project') {
+          results.push({
+            bucketId,
+            ownerAddress: bucketData.userId,
+            project: wrapper.data,
+          });
+          continue;
+        }
+
+        // Fallback: check for VaultWatch-specific data fields (legacy data without app field)
+        if (
+          wrapper.type === 'project' &&
+          wrapper.version === '1.0' &&
+          wrapper.data &&
+          typeof wrapper.data === 'object' &&
+          'ownerAddress' in wrapper.data &&
+          'category' in wrapper.data &&
+          'bucketId' in wrapper.data
+        ) {
+          results.push({
+            bucketId,
+            ownerAddress: bucketData.userId,
+            project: wrapper.data,
+          });
+        }
+      } catch {
+        // Skip buckets that can't be read (not VaultWatch, MSP error, etc.)
+        continue;
+      }
+    }
+
+    console.log(`Discovered ${results.length} VaultWatch projects from ${allBuckets.length} on-chain buckets`);
+    return results;
+  } catch (error) {
+    console.error('Failed to discover VaultWatch buckets:', error);
+    throw new DataHavenError('Bucket discovery failed', 'DISCOVERY_FAILED', error);
   }
 };
 

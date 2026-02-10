@@ -234,11 +234,15 @@ export class AuthenticationError extends DataHavenError {
  */
 export interface StorageWrapper<T> {
   version: string;
+  app?: string;
   type: 'project' | 'commitment' | 'index';
   data: T;
   signature?: string;
   timestamp: number;
 }
+
+/** App identifier for VaultWatch data */
+export const VAULTWATCH_APP_ID = 'vaultwatch';
 
 /**
  * DataHaven client state

@@ -670,38 +670,50 @@ export const useDataHaven = (): UseDataHavenReturn => {
       }
     }
 
-    // Read-only mode: load from cached bucketIds in project store
+    // Read-only mode: discover VaultWatch projects from on-chain bucket scan
     if (isReadOnlyReady) {
-      const cachedProjects = useProjectStore.getState().projects;
-      if (cachedProjects.length === 0) return [];
-
       setIsLoading(true);
       setError(null);
 
       try {
-        const { loadProjectFromBucket } = await import('@/lib/datahaven/client');
+        const { discoverVaultWatchBuckets } = await import('@/lib/datahaven/client');
+        const discovered = await discoverVaultWatchBuckets<Project>();
 
-        const results: Array<{ bucket: Bucket; project: Project | null }> = [];
-        for (const cached of cachedProjects) {
-          const project = await loadProjectFromBucket<Project>(cached.bucketId);
-          results.push({
+        const results: Array<{ bucket: Bucket; project: Project | null }> = discovered.map(
+          ({ bucketId, project }) => ({
             bucket: {
-              bucketId: cached.bucketId as `0x${string}`,
-              name: `vaultwatch-${cached.id}`,
+              bucketId: bucketId as `0x${string}`,
+              name: `vaultwatch-${project.id}`,
               root: '0x' as `0x${string}`,
               isPublic: true,
               sizeBytes: 0,
               valuePropId: '',
-              fileCount: cached.commitmentCount + 1,
+              fileCount: 0,
             },
             project,
-          });
-        }
+          })
+        );
 
-        console.log(`✅ Loaded ${results.length} VaultWatch projects from cache (read-only)`);
+        // Cache to project store
+        const indexEntries: ProjectIndexEntry[] = results
+          .filter(({ project }) => project !== null)
+          .map(({ bucket, project }) => ({
+            id: project!.id,
+            name: project!.name,
+            category: project!.category,
+            status: project!.status,
+            ownerAddress: project!.ownerAddress,
+            bucketId: bucket.bucketId,
+            commitmentCount: 0,
+            lastUpdated: project!.updatedAt,
+          }));
+        useProjectStore.getState().setProjects(indexEntries);
+        useProjectStore.getState().setSyncedAt(Date.now());
+
+        console.log(`✅ Discovered ${results.length} VaultWatch projects (read-only)`);
         return results;
       } catch (err) {
-        console.error('Failed to load projects in read-only mode:', err);
+        console.error('Failed to discover projects in read-only mode:', err);
         return [];
       } finally {
         setIsLoading(false);
