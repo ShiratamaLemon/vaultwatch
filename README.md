@@ -158,14 +158,6 @@ src/
 - **SIWE Authentication**: Required before uploads. Session in memory only (never localStorage).
 - **No `dangerouslySetInnerHTML`**: React's default escaping throughout.
 
-## Documentation
-
-- [Architecture Design](docs/ARCHITECTURE.md)
-- [Data Model](docs/DATA_MODEL.md)
-- [Feature Specifications](docs/FEATURES.md)
-- [DataHaven Integration Guide](docs/DATAHAVEN_INTEGRATION.md)
-- [Security Audit Report](docs/SECURITY_AUDIT_INTEGRATED.md)
-
 ## License
 
 MIT License - See [LICENSE](LICENSE) for details.
